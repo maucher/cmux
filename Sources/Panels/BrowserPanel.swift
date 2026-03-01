@@ -3167,8 +3167,9 @@ private class BrowserNavigationDelegate: NSObject, WKNavigationDelegate {
 
         // WebKit cannot open app-specific deeplinks (discord://, slack://, zoommtg://, etc.).
         // Hand these off to macOS so the owning app can handle them.
+        // Note: the isMainFrame guard is intentionally absent — custom schemes must be forwarded
+        // even from subframes (e.g. hidden iframes used by Zscaler ZPA posture checks).
         if let url = navigationAction.request.url,
-           navigationAction.targetFrame?.isMainFrame != false,
            browserShouldOpenURLExternally(url) {
             let opened = NSWorkspace.shared.open(url)
             if !opened {
