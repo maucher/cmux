@@ -115,6 +115,13 @@ struct cmuxApp: App {
                 defaultValue: "/usr/local/share:/usr/share"
             )
             appendEnvPathIfMissing("MANPATH", path: manDir)
+
+            let terminfoDirs = resourcesURL.appendingPathComponent("terminfo").path
+            appendEnvPathIfMissing(
+                "TERMINFO_DIRS",
+                path: terminfoDirs,
+                defaultValue: "/usr/share/terminfo"
+            )
         }
     }
 
