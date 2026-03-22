@@ -945,6 +945,41 @@ func TestCLIMarkdownNoArgs(t *testing.T) {
 	}
 }
 
+func TestCLIMarkdownPathTranslation(t *testing.T) {
+	// Create a real temp file so os.Stat succeeds (simulating a local devbox file).
+	tmpFile, err := os.CreateTemp(t.TempDir(), "test-*.md")
+	if err != nil {
+		t.Fatalf("create temp file: %v", err)
+	}
+	tmpFile.Close()
+	localPath := tmpFile.Name()
+
+	// Simulate: HOME=/home/ubuntu, CMUX_LOCAL_HOME=/Users/mac
+	fakeHome := filepath.Dir(localPath) // use tmp dir as fake HOME
+	macHome := "/Users/mac"
+	t.Setenv("HOME", fakeHome)
+	t.Setenv("CMUX_LOCAL_HOME", macHome)
+
+	sockPath, requests := startMockV2SocketWithRequestCapture(t)
+	// Path starts with fakeHome — should be rewritten to macHome prefix.
+	code := runCLI([]string{"--socket", sockPath, "--json", "markdown", "open", localPath})
+	if code != 0 {
+		t.Fatalf("markdown open should return 0, got %d", code)
+	}
+
+	select {
+	case req := <-requests:
+		params, _ := req["params"].(map[string]any)
+		got, _ := params["path"].(string)
+		want := macHome + localPath[len(fakeHome):]
+		if got != want {
+			t.Fatalf("expected translated path %q, got %q", want, got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for markdown open request")
+	}
+}
+
 func TestCLIEnvVarDefaults(t *testing.T) {
 	// Test that CMUX_WORKSPACE_ID and CMUX_SURFACE_ID are used as defaults
 	dir := t.TempDir()

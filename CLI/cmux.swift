@@ -4039,6 +4039,7 @@ struct CMUXCLI {
         if !trimmedShellFeatures.isEmpty {
             exports.append("export GHOSTTY_SHELL_FEATURES=\(shellQuote(trimmedShellFeatures))")
         }
+        exports.append("export CMUX_LOCAL_HOME=\(shellQuote(NSHomeDirectory()))")
         return exports
     }
 

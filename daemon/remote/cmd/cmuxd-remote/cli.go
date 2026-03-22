@@ -382,8 +382,21 @@ func runMarkdownRelay(socketPath string, args []string, jsonOutput bool, refresh
 		return 2
 	}
 
+	filePath := parsed.positional[0]
+	// If the file exists locally (devbox) and CMUX_LOCAL_HOME is set, translate
+	// the path to the Mac-side equivalent so markdown.open can find it.
+	if localHome := os.Getenv("HOME"); localHome != "" {
+		if macHome := os.Getenv("CMUX_LOCAL_HOME"); macHome != "" {
+			if _, err := os.Stat(filePath); err == nil {
+				if strings.HasPrefix(filePath, localHome+"/") {
+					filePath = macHome + filePath[len(localHome):]
+				}
+			}
+		}
+	}
+
 	params := make(map[string]any)
-	params["path"] = parsed.positional[0]
+	params["path"] = filePath
 	for _, key := range flagKeys {
 		if val, ok := parsed.flags[key]; ok {
 			params[flagToParamKey(key)] = val
