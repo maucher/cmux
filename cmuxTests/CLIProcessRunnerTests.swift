@@ -340,6 +340,7 @@ final class CLIProcessRunnerTests: XCTestCase {
                 port: nil,
                 identityFile: nil,
                 workspaceName: nil,
+                noFocus: false,
                 sshOptions: [],
                 extraArguments: [],
                 localSocketPath: "",
@@ -409,6 +410,24 @@ print(out.decode("utf-8", "replace"), end="")
         let remoteCommand = try String(contentsOf: remoteCommandURL, encoding: .utf8)
         XCTAssertFalse(remoteCommand.contains("%{255}"), remoteCommand)
         XCTAssertTrue(remoteCommand.contains("base64"), remoteCommand)
+    }
+
+    func testParseSSHCommandOptionsNoFocusFlag() throws {
+        let cli = CMUXCLI(args: [])
+
+        let withFlag = try cli.parseSSHCommandOptions(["user@host", "--no-focus"])
+        XCTAssertTrue(withFlag.noFocus)
+        XCTAssertEqual(withFlag.destination, "user@host")
+
+        let withoutFlag = try cli.parseSSHCommandOptions(["user@host"])
+        XCTAssertFalse(withoutFlag.noFocus)
+
+        let withOtherFlags = try cli.parseSSHCommandOptions([
+            "user@host", "--name", "mybox", "--no-focus", "--port", "2222",
+        ])
+        XCTAssertTrue(withOtherFlags.noFocus)
+        XCTAssertEqual(withOtherFlags.workspaceName, "mybox")
+        XCTAssertEqual(withOtherFlags.port, 2222)
     }
 
     func testEncodedRemoteBootstrapCommandEscapesPercentsForSSHRemoteCommand() throws {
