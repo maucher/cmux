@@ -147,6 +147,11 @@ doneFlags:
 		return runBrowserRelay(socketPath, cmdArgs, jsonOutput, refreshAddr)
 	}
 
+	// Markdown subcommand delegation
+	if cmdName == "markdown" {
+		return runMarkdownRelay(socketPath, cmdArgs, jsonOutput, refreshAddr)
+	}
+
 	spec, ok := commandIndex[cmdName]
 	if !ok {
 		fmt.Fprintf(os.Stderr, "cmux: unknown command %q\n", cmdName)
@@ -336,6 +341,58 @@ func runBrowserRelay(socketPath string, args []string, jsonOutput bool, refreshA
 	}
 
 	resp, err := socketRoundTripV2(socketPath, method, params, refreshAddr)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "cmux: %v\n", err)
+		return 1
+	}
+	if jsonOutput {
+		fmt.Println(resp)
+	} else {
+		fmt.Println(defaultRelayOutput(resp))
+	}
+	return 0
+}
+
+// runMarkdownRelay handles "cmux markdown [open] <path>" by mapping to markdown.open v2 method.
+func runMarkdownRelay(socketPath string, args []string, jsonOutput bool, refreshAddr func() string) int {
+	if len(args) == 0 {
+		fmt.Fprintln(os.Stderr, "cmux markdown: requires a file path. Usage: cmux markdown open <path>")
+		return 2
+	}
+
+	// Support both "cmux markdown open <path>" and "cmux markdown <path>" shorthand.
+	subArgs := args
+	if args[0] == "open" {
+		subArgs = args[1:]
+		if len(subArgs) == 0 {
+			fmt.Fprintln(os.Stderr, "cmux markdown open: requires a file path. Usage: cmux markdown open <path>")
+			return 2
+		}
+	}
+
+	flagKeys := []string{"workspace", "surface", "direction"}
+	parsed, err := parseFlags(subArgs, flagKeys)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "cmux markdown: %v\n", err)
+		return 2
+	}
+
+	if len(parsed.positional) == 0 {
+		fmt.Fprintln(os.Stderr, "cmux markdown: requires a file path. Usage: cmux markdown open <path>")
+		return 2
+	}
+
+	params := make(map[string]any)
+	params["path"] = parsed.positional[0]
+	for _, key := range flagKeys {
+		if val, ok := parsed.flags[key]; ok {
+			params[flagToParamKey(key)] = val
+		}
+	}
+	applyWorkspaceEnvFallback(params)
+	applySurfaceEnvFallback(params)
+
+	resp, err := socketRoundTripV2(socketPath, "markdown.open", params, refreshAddr)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "cmux: %v\n", err)
 		return 1
@@ -754,5 +811,6 @@ func cliUsage() {
 	fmt.Fprintln(os.Stderr, "  send-key                  Send a key to a surface")
 	fmt.Fprintln(os.Stderr, "  notify                    Create a notification")
 	fmt.Fprintln(os.Stderr, "  browser <sub>             Browser commands (open, navigate, back, forward, reload, get-url)")
+	fmt.Fprintln(os.Stderr, "  markdown [open] <path>    Open a markdown file in a viewer panel")
 	fmt.Fprintln(os.Stderr, "  rpc <method> [json-params] Send arbitrary JSON-RPC")
 }

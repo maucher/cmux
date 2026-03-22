@@ -871,6 +871,80 @@ func TestParseFlagsCollectsKnownFlagsAndPositionalArgs(t *testing.T) {
 	}
 }
 
+func TestCLIMarkdownOpen(t *testing.T) {
+	sockPath, requests := startMockV2SocketWithRequestCapture(t)
+	code := runCLI([]string{"--socket", sockPath, "--json", "markdown", "open", "/tmp/plan.md"})
+	if code != 0 {
+		t.Fatalf("markdown open should return 0, got %d", code)
+	}
+
+	select {
+	case req := <-requests:
+		if got := req["method"]; got != "markdown.open" {
+			t.Fatalf("expected markdown.open, got %v", got)
+		}
+		params, _ := req["params"].(map[string]any)
+		if got := params["path"]; got != "/tmp/plan.md" {
+			t.Fatalf("expected path /tmp/plan.md, got %v", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for markdown open request")
+	}
+}
+
+func TestCLIMarkdownOpenShorthand(t *testing.T) {
+	sockPath, requests := startMockV2SocketWithRequestCapture(t)
+	code := runCLI([]string{"--socket", sockPath, "--json", "markdown", "/tmp/plan.md"})
+	if code != 0 {
+		t.Fatalf("markdown shorthand should return 0, got %d", code)
+	}
+
+	select {
+	case req := <-requests:
+		if got := req["method"]; got != "markdown.open" {
+			t.Fatalf("expected markdown.open, got %v", got)
+		}
+		params, _ := req["params"].(map[string]any)
+		if got := params["path"]; got != "/tmp/plan.md" {
+			t.Fatalf("expected path /tmp/plan.md, got %v", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for markdown shorthand request")
+	}
+}
+
+func TestCLIMarkdownOpenWithDirection(t *testing.T) {
+	sockPath, requests := startMockV2SocketWithRequestCapture(t)
+	code := runCLI([]string{"--socket", sockPath, "--json", "markdown", "open", "/tmp/plan.md", "--direction", "right"})
+	if code != 0 {
+		t.Fatalf("markdown open --direction should return 0, got %d", code)
+	}
+
+	select {
+	case req := <-requests:
+		params, _ := req["params"].(map[string]any)
+		if got := params["direction"]; got != "right" {
+			t.Fatalf("expected direction right, got %v", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for markdown open --direction request")
+	}
+}
+
+func TestCLIMarkdownOpenMissingPath(t *testing.T) {
+	code := runCLI([]string{"--socket", "/tmp/nonexistent.sock", "markdown", "open"})
+	if code != 2 {
+		t.Fatalf("markdown open without path should return 2, got %d", code)
+	}
+}
+
+func TestCLIMarkdownNoArgs(t *testing.T) {
+	code := runCLI([]string{"--socket", "/tmp/nonexistent.sock", "markdown"})
+	if code != 2 {
+		t.Fatalf("markdown with no args should return 2, got %d", code)
+	}
+}
+
 func TestCLIEnvVarDefaults(t *testing.T) {
 	// Test that CMUX_WORKSPACE_ID and CMUX_SURFACE_ID are used as defaults
 	dir := t.TempDir()
