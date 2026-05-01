@@ -45,6 +45,9 @@ type commandSpec struct {
 	paramKeyOverrides map[string]string
 	// defaultParams are applied before flags/env fallbacks.
 	defaultParams map[string]any
+	// positionalKeys maps positional args by index to JSON param keys.
+	// e.g. ["key", "value"] means argv[0]→params["key"], argv[1]→params["value"]
+	positionalKeys []string
 }
 
 var commands = []commandSpec{
@@ -75,6 +78,12 @@ var commands = []commandSpec{
 	{name: "send-key", proto: protoV2, v2Method: "surface.send_key", flagKeys: []string{"surface", "key"}},
 	{name: "notify", proto: protoV2, v2Method: "notification.create", flagKeys: []string{"title", "body", "workspace"}},
 	{name: "refresh-surfaces", proto: protoV2, v2Method: "surface.refresh", noParams: true},
+	{name: "set-status", proto: protoV2, v2Method: "sidebar.set_status",
+		positionalKeys: []string{"key", "value"},
+		flagKeys:       []string{"icon", "color", "priority", "format", "url", "workspace"}},
+	{name: "clear-status", proto: protoV2, v2Method: "sidebar.clear_status",
+		positionalKeys: []string{"key"},
+		flagKeys:       []string{"workspace"}},
 }
 
 var commandIndex map[string]*commandSpec
@@ -236,8 +245,14 @@ func execV2(socketPath string, spec *commandSpec, args []string, jsonOutput bool
 			}
 		}
 
-		// First positional arg is used as initial_command if --command wasn't given
-		if _, ok := params["initial_command"]; !ok && len(parsed.positional) > 0 {
+		// Map positional args to named params, or fall back to legacy initial_command
+		if len(spec.positionalKeys) > 0 {
+			for i, paramKey := range spec.positionalKeys {
+				if i < len(parsed.positional) {
+					params[paramKey] = parsed.positional[i]
+				}
+			}
+		} else if _, ok := params["initial_command"]; !ok && len(parsed.positional) > 0 {
 			params["initial_command"] = parsed.positional[0]
 		}
 
@@ -773,6 +788,8 @@ func cliUsage() {
 	fmt.Fprintln(os.Stderr, "  send                      Send text to a surface")
 	fmt.Fprintln(os.Stderr, "  send-key                  Send a key to a surface")
 	fmt.Fprintln(os.Stderr, "  notify                    Create a notification")
+	fmt.Fprintln(os.Stderr, "  set-status <key> <value>  Set a sidebar status pill [--icon=X] [--color=#hex] [--priority=N] [--format=plain|markdown] [--url=X]")
+	fmt.Fprintln(os.Stderr, "  clear-status <key>        Remove a sidebar status pill")
 	fmt.Fprintln(os.Stderr, "  browser <sub>             Browser commands (open, navigate, back, forward, reload, get-url)")
 	fmt.Fprintln(os.Stderr, "  claude-teams [args...]     Launch Claude Code in teammate mode")
 	fmt.Fprintln(os.Stderr, "  omo [args...]              Launch OpenCode with cmux integration")

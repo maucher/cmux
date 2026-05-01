@@ -14,7 +14,7 @@ extension Notification.Name {
     static let reactGrabDidCopySelection = Notification.Name("cmux.reactGrabDidCopySelection")
 }
 
-nonisolated private struct SocketLineProcessingResult: Sendable {
+private struct SocketLineProcessingResult: Sendable {
     let response: String
     let authenticated: Bool
 }
@@ -2531,6 +2531,10 @@ class TerminalController {
             return v2Ok(id: id, result: self.v2NotificationList())
         case "notification.clear":
             return v2Result(id: id, self.v2NotificationClear())
+        case "sidebar.set_status":
+            return v2Result(id: id, self.v2SidebarSetStatus(params: params))
+        case "sidebar.clear_status":
+            return v2Result(id: id, self.v2SidebarClearStatus(params: params))
 
         // App focus
         case "app.focus_override.set":
@@ -2880,6 +2884,8 @@ class TerminalController {
             "notification.create_for_target",
             "notification.list",
             "notification.clear",
+            "sidebar.set_status",
+            "sidebar.clear_status",
             "app.focus_override.set",
             "app.simulate_active",
             "file.open",
@@ -7915,6 +7921,91 @@ class TerminalController {
 
     private func v2NotificationClear() -> V2CallResult {
         TerminalMutationBus.shared.enqueueClearAllNotifications()
+        return .ok([:])
+    }
+
+    private func v2SidebarSetStatus(params: [String: Any]) -> V2CallResult {
+        guard let key = params["key"] as? String, !key.isEmpty else {
+            return .err(code: "invalid_params", message: "sidebar.set_status requires 'key'", data: nil)
+        }
+        guard let value = params["value"] as? String else {
+            return .err(code: "invalid_params", message: "sidebar.set_status requires 'value'", data: nil)
+        }
+
+        let icon = params["icon"] as? String
+        let color = params["color"] as? String
+
+        let format: SidebarMetadataFormat
+        if let rawFormat = params["format"] as? String {
+            guard let parsed = parseSidebarMetadataFormat(rawFormat) else {
+                return .err(code: "invalid_params", message: "Invalid format '\(rawFormat)' — use: plain, markdown", data: nil)
+            }
+            format = parsed
+        } else {
+            format = .plain
+        }
+
+        let priority: Int
+        if let rawPriority = params["priority"] {
+            guard let p = rawPriority as? Int else {
+                return .err(code: "invalid_params", message: "Invalid priority — must be an integer", data: nil)
+            }
+            priority = max(-9999, min(9999, p))
+        } else {
+            priority = 0
+        }
+
+        let parsedURL: URL?
+        if let rawURL = params["url"] as? String {
+            guard let candidate = URL(string: rawURL),
+                  let scheme = candidate.scheme?.lowercased(),
+                  scheme == "http" || scheme == "https" else {
+                return .err(code: "invalid_params", message: "Invalid url '\(rawURL)' — expected http(s) URL", data: nil)
+            }
+            parsedURL = candidate
+        } else {
+            parsedURL = nil
+        }
+
+        guard let tabManager = v2ResolveTabManager(params: params) else {
+            return .err(code: "internal_error", message: "No tab manager found", data: nil)
+        }
+        guard let ws = v2ResolveWorkspace(params: params, tabManager: tabManager) else {
+            return .err(code: "internal_error", message: "No workspace found", data: nil)
+        }
+
+        let wsId = v2MainSync {
+            if Self.shouldReplaceStatusEntry(
+                current: ws.statusEntries[key],
+                key: key, value: value, icon: icon, color: color,
+                url: parsedURL, priority: priority, format: format
+            ) {
+                ws.statusEntries[key] = SidebarStatusEntry(
+                    key: key, value: value, icon: icon, color: color,
+                    url: parsedURL, priority: priority, format: format,
+                    timestamp: Date()
+                )
+            }
+            return ws.id
+        }
+        return .ok(["workspace_id": wsId.uuidString])
+    }
+
+    private func v2SidebarClearStatus(params: [String: Any]) -> V2CallResult {
+        guard let key = params["key"] as? String, !key.isEmpty else {
+            return .err(code: "invalid_params", message: "sidebar.clear_status requires 'key'", data: nil)
+        }
+
+        guard let tabManager = v2ResolveTabManager(params: params) else {
+            return .err(code: "internal_error", message: "No tab manager found", data: nil)
+        }
+        guard let ws = v2ResolveWorkspace(params: params, tabManager: tabManager) else {
+            return .err(code: "internal_error", message: "No workspace found", data: nil)
+        }
+
+        v2MainSync {
+            ws.statusEntries.removeValue(forKey: key)
+        }
         return .ok([:])
     }
 
