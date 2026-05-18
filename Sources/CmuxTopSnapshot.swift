@@ -3,7 +3,7 @@ import Darwin
 
 private nonisolated let cmuxTopPIDPathBufferSize = 4096
 
-nonisolated struct CmuxTopResourceSummary: Sendable {
+struct CmuxTopResourceSummary: Sendable {
     var cpuPercent: Double = 0
     var residentBytes: Int64 = 0
     var virtualBytes: Int64 = 0
@@ -32,7 +32,7 @@ nonisolated struct CmuxTopResourceSummary: Sendable {
     }
 }
 
-nonisolated struct CmuxTopProcessInfo: Sendable {
+struct CmuxTopProcessInfo: Sendable {
     let pid: Int
     let parentPID: Int
     let name: String
@@ -49,7 +49,7 @@ nonisolated struct CmuxTopProcessInfo: Sendable {
     let threadCount: Int
 }
 
-nonisolated struct CmuxTopProcessScope: Sendable {
+struct CmuxTopProcessScope: Sendable {
     let workspaceID: UUID?
     let surfaceID: UUID?
     let attributionReason: String
@@ -61,7 +61,7 @@ nonisolated struct CmuxTopProcessScope: Sendable {
     }
 }
 
-nonisolated final class CmuxTopProcessSnapshot: @unchecked Sendable {
+final class CmuxTopProcessSnapshot: @unchecked Sendable {
     let sampledAt: Date
     private let includesProcessDetails: Bool
     private let processesByPID: [Int: CmuxTopProcessInfo]
