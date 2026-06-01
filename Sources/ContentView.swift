@@ -10980,7 +10980,7 @@ private struct PromptTextEditorContainer: View {
 }
 
 @MainActor
-private final class PromptLauncherModel: ObservableObject {
+enum SidebarPromptLauncherCommandBuilder {
     static let targets: [(id: String, label: String)] = [
         ("auto",     "auto"),
         ("local",    "local"),
@@ -10992,7 +10992,37 @@ private final class PromptLauncherModel: ObservableObject {
     static let models: [(id: String, label: String)] = [
         ("claude", "claude"),
         ("cursor", "cursor"),
+        ("codex", "codex"),
     ]
+
+    nonisolated static func arguments(target: String, model: String, prompt: String) -> [String] {
+        var args: [String] = []
+        if model != "claude" {
+            args.append(model)
+        }
+        if target != "auto" {
+            args.append(target)
+        }
+        args.append(prompt)
+        return args
+    }
+
+    nonisolated static func shellCommand(wsPath: String, target: String, model: String, prompt: String) -> String {
+        let escapedArgs = arguments(target: target, model: model, prompt: prompt)
+            .map(shellSingleQuote)
+            .joined(separator: " ")
+        return "WS_VERBOSE=1 \(wsPath) \(escapedArgs)"
+    }
+
+    private nonisolated static func shellSingleQuote(_ value: String) -> String {
+        "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
+    }
+}
+
+@MainActor
+private final class PromptLauncherModel: ObservableObject {
+    static let targets = SidebarPromptLauncherCommandBuilder.targets
+    static let models = SidebarPromptLauncherCommandBuilder.models
 
     @Published var promptText: String = ""
     @Published var selectedTarget: String = "auto"
@@ -11048,12 +11078,12 @@ private final class PromptLauncherModel: ObservableObject {
 
     private func runWS(target: String, model: String, prompt: String) async {
         guard let wsPath = Self.resolveWSBin() else { return }
-        var args: [String] = []
-        if model == "cursor" { args.append("cursor") }
-        if target != "auto" { args.append(target) }
-        args.append(prompt)
-        let escapedArgs = args.map { "'\($0.replacingOccurrences(of: "'", with: "'\\''"))'" }.joined(separator: " ")
-        let shellCmd = "WS_VERBOSE=1 \(wsPath) \(escapedArgs)"
+        let shellCmd = SidebarPromptLauncherCommandBuilder.shellCommand(
+            wsPath: wsPath,
+            target: target,
+            model: model,
+            prompt: prompt
+        )
 
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: "/bin/zsh")
@@ -12803,9 +12833,21 @@ private struct TabItemView: View, Equatable {
         )
     }
 
+    private var activeWorkspaceBackgroundNSColor: NSColor {
+        let style = sidebarWorkspaceRowBackgroundStyle(
+            activeTabIndicatorStyle: activeTabIndicatorStyle,
+            isActive: isActive,
+            isMultiSelected: isMultiSelected,
+            customColorHex: workspaceSnapshot.customColorHex,
+            colorScheme: colorScheme,
+            sidebarSelectionColorHex: sidebarSelectionColorHex
+        )
+        return style.color ?? selectedWorkspaceBackgroundNSColor
+    }
+
     private func selectedWorkspaceForegroundNSColor(opacity: CGFloat) -> NSColor {
         sidebarSelectedWorkspaceForegroundNSColor(
-            on: selectedWorkspaceBackgroundNSColor,
+            on: activeWorkspaceBackgroundNSColor,
             opacity: opacity
         )
     }
@@ -14013,7 +14055,7 @@ private struct TabItemView: View, Equatable {
 
         return SidebarWorkspaceSnapshotBuilder.Snapshot(
             presentationKey: workspaceSnapshotPresentationKey,
-            title: tab.title,
+            title: IndexedWsWorkspaceSupport.sidebarTitle(from: tab.title),
             customDescription: settings.showsWorkspaceDescription ? sidebarVisibleCustomDescription : nil,
             isPinned: tab.isPinned,
             customColorHex: tab.customColor,

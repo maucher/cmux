@@ -94,7 +94,7 @@ final class SidebarSelectedWorkspaceColorTests: XCTestCase {
     }
 
     @MainActor
-    func testSolidFillKeepsSelectedBackgroundForActiveCustomColoredWorkspaceRow() {
+    func testSolidFillUsesCustomColorForActiveCustomColoredWorkspaceRow() {
         let manager = TabManager()
         guard let workspace = manager.tabs.first else {
             XCTFail("Expected TabManager to initialise with a workspace")
@@ -120,16 +120,13 @@ final class SidebarSelectedWorkspaceColorTests: XCTestCase {
             sidebarSelectionColorHex: nil
         )
 
-        XCTAssertEqual(
-            background.color?.hexString(),
-            sidebarSelectedWorkspaceBackgroundNSColor(for: .light).hexString()
-        )
+        XCTAssertEqual(background.color?.hexString(), "#C0392B")
         XCTAssertEqual(background.opacity, 1.0, accuracy: 0.001)
         withExtendedLifetime(cancellable) {}
     }
 
     @MainActor
-    func testLeftRailKeepsSelectedBackgroundForActiveCustomColoredWorkspaceRow() {
+    func testLeftRailUsesCustomColorForActiveCustomColoredWorkspaceRow() {
         let manager = TabManager()
         guard let workspace = manager.tabs.first else {
             XCTFail("Expected TabManager to initialise with a workspace")
@@ -155,16 +152,30 @@ final class SidebarSelectedWorkspaceColorTests: XCTestCase {
             sidebarSelectionColorHex: nil
         )
 
+        XCTAssertEqual(background.color?.hexString(), "#C0392B")
+        XCTAssertEqual(background.opacity, 1.0, accuracy: 0.001)
+        withExtendedLifetime(cancellable) {}
+    }
+
+    func testActiveUncoloredWorkspaceRowUsesSelectedBackground() {
+        let background = sidebarWorkspaceRowBackgroundStyle(
+            activeTabIndicatorStyle: .solidFill,
+            isActive: true,
+            isMultiSelected: false,
+            customColorHex: nil,
+            colorScheme: .light,
+            sidebarSelectionColorHex: nil
+        )
+
         XCTAssertEqual(
             background.color?.hexString(),
             sidebarSelectedWorkspaceBackgroundNSColor(for: .light).hexString()
         )
         XCTAssertEqual(background.opacity, 1.0, accuracy: 0.001)
-        withExtendedLifetime(cancellable) {}
     }
 
     @MainActor
-    func testLeftRailLeavesInactiveCustomColoredWorkspaceRowTransparent() {
+    func testLeftRailUsesCustomColorForInactiveCustomColoredWorkspaceRow() {
         let manager = TabManager()
         guard let workspace = manager.tabs.first else {
             XCTFail("Expected TabManager to initialise with a workspace")
@@ -182,8 +193,8 @@ final class SidebarSelectedWorkspaceColorTests: XCTestCase {
             sidebarSelectionColorHex: nil
         )
 
-        XCTAssertNil(background.color)
-        XCTAssertEqual(background.opacity, 0, accuracy: 0.001)
+        XCTAssertEqual(background.color?.hexString(), "#C0392B")
+        XCTAssertEqual(background.opacity, 0.7, accuracy: 0.001)
     }
 
     @MainActor
@@ -227,6 +238,92 @@ final class SidebarSelectedWorkspaceColorTests: XCTestCase {
 
         XCTAssertEqual(background.color?.hexString(), "#C0392B")
         XCTAssertEqual(background.opacity, 0.7, accuracy: 0.001)
+    }
+}
+
+final class IndexedWsWorkspaceSupportTests: XCTestCase {
+    func testSlotNameParsesIndexedWorkspaceTitlesWithAndWithoutIcon() {
+        XCTAssertEqual(IndexedWsWorkspaceSupport.slotName(inTitle: "🔴 [wk0] Tracker Update"), "wk0")
+        XCTAssertEqual(IndexedWsWorkspaceSupport.slotName(inTitle: "[wk12] Tracker Update"), "wk12")
+        XCTAssertEqual(IndexedWsWorkspaceSupport.slotName(inTitle: "🔵 [1] Equipment Idling Search"), "wk1")
+        XCTAssertEqual(IndexedWsWorkspaceSupport.slotName(inTitle: "[12] Equipment Idling Search"), "wk12")
+        XCTAssertNil(IndexedWsWorkspaceSupport.slotName(inTitle: "🔴 Tracker Update"))
+        XCTAssertNil(IndexedWsWorkspaceSupport.slotName(inTitle: "local [wk0] Tracker Update"))
+    }
+
+    func testSidebarTitleRemovesOnlyLeadingSlotIcon() {
+        XCTAssertEqual(
+            IndexedWsWorkspaceSupport.sidebarTitle(from: "🔵 [wk1] Cmux Updates"),
+            "[wk1] Cmux Updates"
+        )
+        XCTAssertEqual(
+            IndexedWsWorkspaceSupport.sidebarTitle(from: "[wk1] Cmux Updates"),
+            "[wk1] Cmux Updates"
+        )
+        XCTAssertEqual(
+            IndexedWsWorkspaceSupport.sidebarTitle(from: "🔵 [1] Cmux Updates"),
+            "[1] Cmux Updates"
+        )
+        XCTAssertEqual(
+            IndexedWsWorkspaceSupport.sidebarTitle(from: "🔵 Cmux Updates"),
+            "🔵 Cmux Updates"
+        )
+    }
+
+    func testResetCandidateRequiresMatchingStateFile() throws {
+        let directoryURL = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directoryURL) }
+
+        let workspaceId = UUID()
+
+        XCTAssertNil(IndexedWsWorkspaceSupport.resetCandidate(
+            workspaceId: workspaceId,
+            title: "🔴 [3] Missing State",
+            worktreesDir: directoryURL
+        ))
+
+        try #"{"ws":"workspace:3","name":"🔴 [3] Existing State"}"#
+            .write(to: directoryURL.appendingPathComponent("wk3.json"), atomically: true, encoding: .utf8)
+
+        XCTAssertEqual(
+            IndexedWsWorkspaceSupport.resetCandidate(
+                workspaceId: workspaceId,
+                title: "🔴 [3] Existing State",
+                worktreesDir: directoryURL
+            )?.slotName,
+            "wk3"
+        )
+    }
+
+    func testResetCandidateRespectsPersistedWorkspaceIdWhenPresent() throws {
+        let directoryURL = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directoryURL) }
+
+        let matchingWorkspaceId = UUID()
+        let otherWorkspaceId = UUID()
+        try #"{"workspaceId":"\#(matchingWorkspaceId.uuidString)","ws":"workspace:4"}"#
+            .write(to: directoryURL.appendingPathComponent("wk4.json"), atomically: true, encoding: .utf8)
+
+        XCTAssertEqual(
+            IndexedWsWorkspaceSupport.resetCandidate(
+                workspaceId: matchingWorkspaceId,
+                title: "🟣 [4] Matching State",
+                worktreesDir: directoryURL
+            )?.slotName,
+            "wk4"
+        )
+        XCTAssertNil(IndexedWsWorkspaceSupport.resetCandidate(
+            workspaceId: otherWorkspaceId,
+            title: "🟣 [4] Matching State",
+            worktreesDir: directoryURL
+        ))
+    }
+
+    private func makeTemporaryDirectory() throws -> URL {
+        let directoryURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+        return directoryURL
     }
 }
 

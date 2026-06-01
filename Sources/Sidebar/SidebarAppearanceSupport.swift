@@ -287,9 +287,21 @@ func sidebarWorkspaceRowBackgroundStyle(
     switch activeTabIndicatorStyle {
     case .leftRail:
         if isActive {
+            if let customBackground {
+                return SidebarWorkspaceRowBackgroundStyle(
+                    color: customBackground,
+                    opacity: 1
+                )
+            }
             return SidebarWorkspaceRowBackgroundStyle(
                 color: selectedBackground,
                 opacity: 1
+            )
+        }
+        if let customBackground {
+            return SidebarWorkspaceRowBackgroundStyle(
+                color: customBackground,
+                opacity: isMultiSelected ? 0.35 : 0.7
             )
         }
         if isMultiSelected {
@@ -299,6 +311,12 @@ func sidebarWorkspaceRowBackgroundStyle(
 
     case .solidFill:
         if isActive {
+            if let customBackground {
+                return SidebarWorkspaceRowBackgroundStyle(
+                    color: customBackground,
+                    opacity: 1
+                )
+            }
             return SidebarWorkspaceRowBackgroundStyle(
                 color: selectedBackground,
                 opacity: 1

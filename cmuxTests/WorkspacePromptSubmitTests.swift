@@ -9,6 +9,25 @@ import CMUXWorkstream
 
 @MainActor
 final class WorkspacePromptSubmitTests: XCTestCase {
+    func testSidebarPromptLauncherBuildsCodexWsArguments() {
+        XCTAssertEqual(
+            SidebarPromptLauncherCommandBuilder.arguments(
+                target: "local",
+                model: "codex",
+                prompt: "Add Codex mode"
+            ),
+            ["codex", "local", "Add Codex mode"]
+        )
+        XCTAssertEqual(
+            SidebarPromptLauncherCommandBuilder.arguments(
+                target: "auto",
+                model: "claude",
+                prompt: "Default provider"
+            ),
+            ["Default provider"]
+        )
+    }
+
     func testPromptSubmitRecordsMessageAndMovesWorkspaceToTopWhenIMessageModeEnabled() throws {
         let manager = TabManager()
         let first = manager.tabs[0]

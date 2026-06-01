@@ -259,6 +259,90 @@ enum SidebarWorkspaceDetailSettings {
     }
 }
 
+struct IndexedWsWorkspaceResetCandidate: Equatable {
+    let slotName: String
+    let stateURL: URL
+}
+
+enum IndexedWsWorkspaceSupport {
+    static func slotName(inTitle title: String) -> String? {
+        let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedTitle.isEmpty else { return nil }
+
+        if let slot = leadingSlotName(in: trimmedTitle) {
+            return slot
+        }
+
+        let afterLeadingGlyph = String(trimmedTitle.dropFirst())
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return leadingSlotName(in: afterLeadingGlyph)
+    }
+
+    static func sidebarTitle(from title: String) -> String {
+        let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedTitle.isEmpty,
+              leadingSlotName(in: trimmedTitle) == nil else {
+            return title
+        }
+
+        let afterLeadingGlyph = String(trimmedTitle.dropFirst())
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard leadingSlotName(in: afterLeadingGlyph) != nil else {
+            return title
+        }
+        return afterLeadingGlyph
+    }
+
+    static func resetCandidate(
+        workspaceId: UUID,
+        title: String,
+        worktreesDir: URL,
+        fileManager: FileManager = .default
+    ) -> IndexedWsWorkspaceResetCandidate? {
+        guard let slotName = slotName(inTitle: title) else { return nil }
+        let stateURL = worktreesDir.appendingPathComponent("\(slotName).json", isDirectory: false)
+        guard fileManager.fileExists(atPath: stateURL.path) else { return nil }
+
+        guard let data = fileManager.contents(atPath: stateURL.path),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return IndexedWsWorkspaceResetCandidate(slotName: slotName, stateURL: stateURL)
+        }
+
+        if let persistedWorkspaceId = persistedWorkspaceId(in: json),
+           persistedWorkspaceId != workspaceId {
+            return nil
+        }
+        return IndexedWsWorkspaceResetCandidate(slotName: slotName, stateURL: stateURL)
+    }
+
+    private static func leadingSlotName(in title: String) -> String? {
+        guard title.hasPrefix("["),
+              let closingBracket = title.firstIndex(of: "]") else {
+            return nil
+        }
+        let token = title[title.startIndex...closingBracket]
+        let slotBody = token.dropFirst().dropLast()
+        let digits: Substring
+        if slotBody.hasPrefix("wk") {
+            digits = slotBody.dropFirst(2)
+        } else {
+            digits = slotBody
+        }
+        guard !digits.isEmpty, digits.allSatisfy(\.isNumber) else { return nil }
+        return "wk\(digits)"
+    }
+
+    private static func persistedWorkspaceId(in json: [String: Any]) -> UUID? {
+        for key in ["workspaceId", "workspace_id"] {
+            if let raw = json[key] as? String,
+               let uuid = UUID(uuidString: raw) {
+                return uuid
+            }
+        }
+        return nil
+    }
+}
+
 enum SidebarPullRequestClickabilitySettings {
     static let key = "sidebarMakePullRequestClickable"
     static let defaultClickable = true
@@ -5759,32 +5843,35 @@ class TabManager: ObservableObject {
     }
 
     // If the closed workspace matches a ws-managed slot (wkN.json), run `ws reset wkN`
-    // to clean up the devbox worktree. Match is on customTitle == json["name"] since
-    // both are set to the same string by `ws restart`/`ws new` via `cmux rename-workspace`.
-    private func triggerWsResetIfSlotted(workspace: Workspace) {
-        guard let customTitle = workspace.customTitle, !customTitle.isEmpty else { return }
+    // to clean up the devbox worktree. Detection is keyed by the visible [wkN]
+    // slot marker and the matching state file; future state files can optionally
+    // include a workspaceId/workspace_id field for stricter matching.
+    private func triggerWsResetIfSlotted(workspace: Workspace, delayBeforeRun: Bool = false) {
+        let workspaceId = workspace.id
+        let workspaceTitle = workspace.title
         let worktreesDir = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".claude/workon/worktrees")
         let wsScriptPath = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("bin/ws").path
         Task.detached(priority: .utility) {
-            let fm = FileManager.default
-            guard let files = try? fm.contentsOfDirectory(atPath: worktreesDir.path) else { return }
-            for file in files where file.hasPrefix("wk") && file.hasSuffix(".json") {
-                guard let data = fm.contents(atPath: worktreesDir.appendingPathComponent(file).path),
-                      let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                      let name = json["name"] as? String,
-                      name == customTitle else { continue }
-                let slot = String(file.dropLast(5)) // "wk3.json" → "wk3"
-                #if DEBUG
-                cmuxDebugLog("ws reset \(slot) triggered by UI close of '\(customTitle)'")
-                #endif
-                let proc = Process()
-                proc.executableURL = URL(fileURLWithPath: wsScriptPath)
-                proc.arguments = ["reset", slot]
-                try? proc.run()
+            guard let candidate = IndexedWsWorkspaceSupport.resetCandidate(
+                workspaceId: workspaceId,
+                title: workspaceTitle,
+                worktreesDir: worktreesDir
+            ) else {
                 return
             }
+            guard FileManager.default.isExecutableFile(atPath: wsScriptPath) else { return }
+            if delayBeforeRun {
+                try? await Task.sleep(nanoseconds: 300_000_000)
+            }
+            #if DEBUG
+            cmuxDebugLog("ws reset \(candidate.slotName) triggered by cmux close of '\(workspaceTitle)'")
+            #endif
+            let proc = Process()
+            proc.executableURL = URL(fileURLWithPath: wsScriptPath)
+            proc.arguments = ["reset", candidate.slotName]
+            try? proc.run()
         }
     }
 
@@ -6190,6 +6277,7 @@ class TabManager: ObservableObject {
         }
         if tabs.count <= 1 {
             // Last workspace in this window: match Close Workspace shortcut behavior.
+            triggerWsResetIfSlotted(workspace: workspace, delayBeforeRun: true)
             if let window {
                 window.performClose(nil)
             } else {
