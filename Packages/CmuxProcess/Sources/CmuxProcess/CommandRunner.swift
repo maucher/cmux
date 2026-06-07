@@ -108,7 +108,7 @@ public struct CommandRunner: CommandRunning, Sendable {
             // The timeout path never goes through here, so a descendant that inherited a
             // pipe and holds it open past the deadline can never delay the timeout result.
             @Sendable func recordAndCompleteIfReady(_ mutate: @Sendable (inout RunState) -> Void) {
-                let (completed, timerToCancel): (CommandResult?, (any DispatchSourceTimer)?) =
+                let (completed, timerToCancel): (CommandResult?, DispatchTimerBox?) =
                     state.withLock { s in
                         mutate(&s)
                         guard !s.resumed, let out = s.stdout, let err = s.stderr, s.didTerminate else {
@@ -135,7 +135,7 @@ public struct CommandRunner: CommandRunning, Sendable {
             // Resume immediately with a terminal result (timeout or spawn failure),
             // independent of the pipe readers. Returns whether this call won the race.
             @Sendable func claimImmediate(_ result: CommandResult) -> Bool {
-                let (won, timerToCancel): (Bool, (any DispatchSourceTimer)?) =
+                let (won, timerToCancel): (Bool, DispatchTimerBox?) =
                     state.withLock { s in
                         if s.resumed { return (false, nil) }
                         s.resumed = true
@@ -196,6 +196,7 @@ public struct CommandRunner: CommandRunning, Sendable {
             // behind this runner.
             if let timeout {
                 let timer = DispatchSource.makeTimerSource(queue: Self.timerQueue)
+                let timerBox = DispatchTimerBox(timer)
                 timer.schedule(deadline: .now() + timeout)
                 timer.setEventHandler {
                     let timedOut = CommandResult(
@@ -205,18 +206,18 @@ public struct CommandRunner: CommandRunning, Sendable {
                         process.terminate()
                         Self.scheduleSigkill(process)
                     }
-                    timer.cancel()
+                    timerBox.cancel()
                 }
                 // If the command already resumed before we armed the timer, drop it.
                 let alreadyResumed = state.withLock { s -> Bool in
                     if s.resumed { return true }
-                    s.deadlineTimer = timer
+                    s.deadlineTimer = timerBox
                     return false
                 }
                 if alreadyResumed {
-                    timer.cancel()
+                    timerBox.cancel()
                 } else {
-                    timer.resume()
+                    timerBox.resume()
                 }
             }
         }
@@ -231,11 +232,28 @@ public struct CommandRunner: CommandRunning, Sendable {
         var exitStatus: Int32?
         var resumed = false
         // The command deadline timer, cancelled when the continuation resumes (any path).
-        var deadlineTimer: (any DispatchSourceTimer)?
+        var deadlineTimer: DispatchTimerBox?
+    }
+
+    private final class DispatchTimerBox: @unchecked Sendable {
+        private let timer: any DispatchSourceTimer
+
+        init(_ timer: any DispatchSourceTimer) {
+            self.timer = timer
+        }
+
+        func cancel() {
+            timer.cancel()
+        }
+
+        func resume() {
+            timer.resume()
+        }
     }
 
     private static func scheduleSigkill(_ process: Process) {
         let timer = DispatchSource.makeTimerSource(queue: timerQueue)
+        let timerBox = DispatchTimerBox(timer)
         timer.schedule(deadline: .now() + sigkillGraceSeconds)
         timer.setEventHandler {
             // Only SIGKILL if the Process is still running. If it already exited during
@@ -244,9 +262,9 @@ public struct CommandRunner: CommandRunning, Sendable {
             if process.isRunning {
                 kill(process.processIdentifier, SIGKILL)
             }
-            timer.cancel()
+            timerBox.cancel()
         }
-        timer.resume()
+        timerBox.resume()
     }
 
     private static func readToEnd(fileDescriptor: Int32) -> Data {

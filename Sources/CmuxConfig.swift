@@ -12,6 +12,7 @@ struct CmuxConfigFile: Codable, Sendable {
     var actions: [String: CmuxConfigActionDefinition]
     var ui: CmuxConfigUIDefinition?
     var notifications: CmuxNotificationConfigDefinition?
+    var promptLauncher: CmuxPromptLauncherDefinition?
     var newWorkspaceCommand: String?
     var surfaceTabBarButtons: [CmuxSurfaceTabBarButton]?
     var commands: [CmuxCommandDefinition]
@@ -19,13 +20,22 @@ struct CmuxConfigFile: Codable, Sendable {
     var workspaceGroups: CmuxConfigWorkspaceGroupsDefinition?
 
     private enum CodingKeys: String, CodingKey {
-        case actions, ui, notifications, newWorkspaceCommand, surfaceTabBarButtons, commands, vault, workspaceGroups
+        case actions
+        case ui
+        case notifications
+        case promptLauncher
+        case newWorkspaceCommand
+        case surfaceTabBarButtons
+        case commands
+        case vault
+        case workspaceGroups
     }
 
     init(
         actions: [String: CmuxConfigActionDefinition] = [:],
         ui: CmuxConfigUIDefinition? = nil,
         notifications: CmuxNotificationConfigDefinition? = nil,
+        promptLauncher: CmuxPromptLauncherDefinition? = nil,
         newWorkspaceCommand: String? = nil,
         surfaceTabBarButtons: [CmuxSurfaceTabBarButton]? = nil,
         commands: [CmuxCommandDefinition] = [],
@@ -35,6 +45,7 @@ struct CmuxConfigFile: Codable, Sendable {
         self.actions = actions
         self.ui = ui
         self.notifications = notifications
+        self.promptLauncher = promptLauncher
         self.newWorkspaceCommand = newWorkspaceCommand
         self.surfaceTabBarButtons = surfaceTabBarButtons
         self.commands = commands
@@ -54,6 +65,7 @@ struct CmuxConfigFile: Codable, Sendable {
         )
         ui = try container.decodeIfPresent(CmuxConfigUIDefinition.self, forKey: .ui)
         notifications = try container.decodeIfPresent(CmuxNotificationConfigDefinition.self, forKey: .notifications)
+        promptLauncher = try container.decodeIfPresent(CmuxPromptLauncherDefinition.self, forKey: .promptLauncher)
 
         if let rawNewWorkspaceCommand = try container.decodeIfPresent(String.self, forKey: .newWorkspaceCommand) {
             let trimmed = rawNewWorkspaceCommand.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -321,6 +333,257 @@ struct CmuxResolvedNotificationHook: Sendable, Hashable {
         hasher.combine(sourcePath)
         hasher.combine(cwd)
         hasher.combine(trustDescriptor?.fingerprint)
+    }
+}
+
+struct CmuxPromptLauncherChoice: Codable, Sendable, Hashable, Identifiable {
+    var id: String
+    var title: String
+    var args: [String]
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case title
+        case label
+        case args
+        case arguments
+    }
+
+    init(id: String, title: String? = nil, args: [String] = []) {
+        self.id = id
+        self.title = title ?? id
+        self.args = args
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let decodedID = try Self.requiredTrimmedString(forKey: .id, in: container)
+        let decodedTitle = try Self.trimmedString(forKey: .title, in: container)
+            ?? Self.trimmedString(forKey: .label, in: container)
+            ?? decodedID
+        let rawArgs = try container.decodeIfPresent([String].self, forKey: .args)
+            ?? container.decodeIfPresent([String].self, forKey: .arguments)
+            ?? []
+        args = rawArgs.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+        id = decodedID
+        title = decodedTitle
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(title, forKey: .title)
+        try container.encode(args, forKey: .args)
+    }
+
+    private static func requiredTrimmedString(
+        forKey key: CodingKeys,
+        in container: KeyedDecodingContainer<CodingKeys>
+    ) throws -> String {
+        guard let value = try trimmedString(forKey: key, in: container) else {
+            throw DecodingError.dataCorruptedError(
+                forKey: key,
+                in: container,
+                debugDescription: "\(key.stringValue) must not be blank"
+            )
+        }
+        return value
+    }
+
+    private static func trimmedString(
+        forKey key: CodingKeys,
+        in container: KeyedDecodingContainer<CodingKeys>
+    ) throws -> String? {
+        guard let raw = try container.decodeIfPresent(String.self, forKey: key) else { return nil }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+}
+
+struct CmuxPromptLauncherDefinition: Codable, Sendable, Hashable {
+    static let defaultCompletionPatterns: [String] = []
+
+    var command: String
+    var targets: [CmuxPromptLauncherChoice]
+    var providers: [CmuxPromptLauncherChoice]
+    var defaultTarget: String?
+    var defaultProvider: String?
+    var completionPatterns: [String]
+    var metadataPrefix: String?
+    var closeHook: String?
+    var environment: [String: String]
+    var forwardCmuxSocket: Bool
+
+    private enum CodingKeys: String, CodingKey {
+        case command
+        case targets
+        case environments
+        case providers
+        case defaultTarget
+        case defaultEnvironment
+        case defaultProvider
+        case completionPatterns
+        case metadataPrefix
+        case metadataLinePrefix
+        case closeHook
+        case environment
+        case forwardCmuxSocket
+    }
+
+    init(
+        command: String,
+        targets: [CmuxPromptLauncherChoice],
+        providers: [CmuxPromptLauncherChoice],
+        defaultTarget: String? = nil,
+        defaultProvider: String? = nil,
+        completionPatterns: [String] = Self.defaultCompletionPatterns,
+        metadataPrefix: String? = nil,
+        closeHook: String? = nil,
+        environment: [String: String] = [:],
+        forwardCmuxSocket: Bool = true
+    ) {
+        self.command = command
+        self.targets = targets
+        self.providers = providers
+        self.defaultTarget = defaultTarget
+        self.defaultProvider = defaultProvider
+        self.completionPatterns = completionPatterns
+        self.metadataPrefix = metadataPrefix
+        self.closeHook = closeHook
+        self.environment = environment
+        self.forwardCmuxSocket = forwardCmuxSocket
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        command = try Self.requiredTrimmedString(forKey: .command, in: container)
+        targets = try container.decodeIfPresent([CmuxPromptLauncherChoice].self, forKey: .targets)
+            ?? container.decodeIfPresent([CmuxPromptLauncherChoice].self, forKey: .environments)
+            ?? []
+        providers = try container.decodeIfPresent([CmuxPromptLauncherChoice].self, forKey: .providers) ?? []
+        try Self.validateChoices(targets, label: "targets", codingPath: decoder.codingPath + [CodingKeys.targets])
+        try Self.validateChoices(providers, label: "providers", codingPath: decoder.codingPath + [CodingKeys.providers])
+
+        defaultTarget = try Self.trimmedString(forKey: .defaultTarget, in: container)
+            ?? Self.trimmedString(forKey: .defaultEnvironment, in: container)
+        defaultProvider = try Self.trimmedString(forKey: .defaultProvider, in: container)
+        if let defaultTarget, !targets.contains(where: { $0.id == defaultTarget }) {
+            throw DecodingError.dataCorrupted(
+                DecodingError.Context(
+                    codingPath: decoder.codingPath + [CodingKeys.defaultTarget],
+                    debugDescription: "defaultTarget must reference a configured target id"
+                )
+            )
+        }
+        if let defaultProvider, !providers.contains(where: { $0.id == defaultProvider }) {
+            throw DecodingError.dataCorrupted(
+                DecodingError.Context(
+                    codingPath: decoder.codingPath + [CodingKeys.defaultProvider],
+                    debugDescription: "defaultProvider must reference a configured provider id"
+                )
+            )
+        }
+
+        let decodedPatterns = try container.decodeIfPresent([String].self, forKey: .completionPatterns) ?? Self.defaultCompletionPatterns
+        completionPatterns = decodedPatterns
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        metadataPrefix = try Self.trimmedString(forKey: .metadataPrefix, in: container)
+            ?? Self.trimmedString(forKey: .metadataLinePrefix, in: container)
+        closeHook = try Self.trimmedString(forKey: .closeHook, in: container)
+        let decodedEnvironment = try container.decodeIfPresent([String: String].self, forKey: .environment) ?? [:]
+        environment = decodedEnvironment.reduce(into: [:]) { result, item in
+            let key = item.key.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !key.isEmpty else { return }
+            result[key] = item.value
+        }
+        forwardCmuxSocket = try container.decodeIfPresent(Bool.self, forKey: .forwardCmuxSocket) ?? true
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(command, forKey: .command)
+        try container.encode(targets, forKey: .targets)
+        try container.encode(providers, forKey: .providers)
+        try container.encodeIfPresent(defaultTarget, forKey: .defaultTarget)
+        try container.encodeIfPresent(defaultProvider, forKey: .defaultProvider)
+        try container.encode(completionPatterns, forKey: .completionPatterns)
+        try container.encodeIfPresent(metadataPrefix, forKey: .metadataPrefix)
+        try container.encodeIfPresent(closeHook, forKey: .closeHook)
+        try container.encode(environment, forKey: .environment)
+        try container.encode(forwardCmuxSocket, forKey: .forwardCmuxSocket)
+    }
+
+    var selectedDefaultTargetID: String {
+        defaultTarget ?? targets.first?.id ?? ""
+    }
+
+    var selectedDefaultProviderID: String {
+        defaultProvider ?? providers.first?.id ?? ""
+    }
+
+    var trustCommandDescription: String {
+        var parts = ["command: \(command)"]
+        if let closeHook {
+            parts.append("closeHook: \(closeHook)")
+        }
+        if !environment.isEmpty {
+            let environmentDescription = environment.keys.sorted()
+                .map { "\($0)=\(environment[$0] ?? "")" }
+                .joined(separator: "\n")
+            parts.append("environment:\n\(environmentDescription)")
+        }
+        parts.append("forwardCmuxSocket: \(forwardCmuxSocket)")
+        return parts.joined(separator: "\n")
+    }
+
+    private static func validateChoices(
+        _ choices: [CmuxPromptLauncherChoice],
+        label: String,
+        codingPath: [CodingKey]
+    ) throws {
+        guard !choices.isEmpty else {
+            throw DecodingError.dataCorrupted(
+                DecodingError.Context(
+                    codingPath: codingPath,
+                    debugDescription: "promptLauncher.\(label) must not be empty"
+                )
+            )
+        }
+        var seen = Set<String>()
+        for choice in choices {
+            guard seen.insert(choice.id).inserted else {
+                throw DecodingError.dataCorrupted(
+                    DecodingError.Context(
+                        codingPath: codingPath,
+                        debugDescription: "promptLauncher.\(label) must not contain duplicate id '\(choice.id)'"
+                    )
+                )
+            }
+        }
+    }
+
+    private static func requiredTrimmedString(
+        forKey key: CodingKeys,
+        in container: KeyedDecodingContainer<CodingKeys>
+    ) throws -> String {
+        guard let value = try trimmedString(forKey: key, in: container) else {
+            throw DecodingError.dataCorruptedError(
+                forKey: key,
+                in: container,
+                debugDescription: "\(key.stringValue) must not be blank"
+            )
+        }
+        return value
+    }
+
+    private static func trimmedString(
+        forKey key: CodingKeys,
+        in container: KeyedDecodingContainer<CodingKeys>
+    ) throws -> String? {
+        guard let raw = try container.decodeIfPresent(String.self, forKey: key) else { return nil }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 }
 
@@ -1885,6 +2148,7 @@ final class CmuxConfigStore: ObservableObject {
 
     @Published private(set) var loadedCommands: [CmuxCommandDefinition] = []
     @Published private(set) var loadedActions: [CmuxResolvedConfigAction] = []
+    @Published private(set) var promptLauncher: CmuxPromptLauncherDefinition?
     @Published private(set) var newWorkspaceCommandName: String?
     @Published private(set) var newWorkspaceActionID: String?
     @Published private(set) var newWorkspaceContextMenuItems: [CmuxResolvedConfigContextMenuItem] = []
@@ -1901,6 +2165,7 @@ final class CmuxConfigStore: ObservableObject {
     /// Which config file each command came from, keyed by command id.
     private(set) var commandSourcePaths: [String: String] = [:]
     private(set) var actionLookup: [String: CmuxResolvedConfigAction] = [:]
+    private(set) var promptLauncherSourcePath: String?
     private(set) var surfaceTabBarButtonSourcePath: String?
     private(set) var surfaceTabBarCommandSourcePaths: [String: String] = [:]
     private(set) var newWorkspaceActionSourcePath: String?
@@ -2030,6 +2295,7 @@ final class CmuxConfigStore: ObservableObject {
     func wireDirectoryTracking(tabManager: TabManager) {
         trackingCancellables.removeAll()
         self.tabManager = tabManager
+        tabManager.cmuxConfigStore = self
 
         tabManager.$selectedTabId
             .compactMap { [weak tabManager] tabId -> Workspace? in
@@ -2151,6 +2417,8 @@ final class CmuxConfigStore: ObservableObject {
         var configuredNewWorkspaceActionSourcePath: String?
         var configuredNewWorkspaceContextMenu: [CmuxConfigContextMenuItem]?
         var configuredNewWorkspaceContextMenuSourcePath: String?
+        var configuredPromptLauncher: CmuxPromptLauncherDefinition?
+        var configuredPromptLauncherSourcePath: String?
         var configuredSurfaceTabBarButtons: [CmuxSurfaceTabBarButton]?
         var configuredSurfaceTabBarButtonSourcePath: String?
         let localPath = localConfigPath
@@ -2187,6 +2455,10 @@ final class CmuxConfigStore: ObservableObject {
                 configuredNewWorkspaceContextMenu = contextMenu
                 configuredNewWorkspaceContextMenuSourcePath = localPath
             }
+            if let promptLauncher = localConfig.promptLauncher {
+                configuredPromptLauncher = promptLauncher
+                configuredPromptLauncherSourcePath = localPath
+            }
             if configuredNewWorkspaceActionID == nil,
                let newWorkspaceCommand = localConfig.newWorkspaceCommand {
                 configuredNewWorkspaceCommandName = newWorkspaceCommand
@@ -2219,6 +2491,11 @@ final class CmuxConfigStore: ObservableObject {
                let contextMenu = globalConfig.ui?.newWorkspace?.contextMenu {
                 configuredNewWorkspaceContextMenu = contextMenu
                 configuredNewWorkspaceContextMenuSourcePath = globalConfigPath
+            }
+            if configuredPromptLauncher == nil,
+               let promptLauncher = globalConfig.promptLauncher {
+                configuredPromptLauncher = promptLauncher
+                configuredPromptLauncherSourcePath = globalConfigPath
             }
             if configuredNewWorkspaceActionID == nil,
                configuredNewWorkspaceCommandName == nil,
@@ -2295,6 +2572,8 @@ final class CmuxConfigStore: ObservableObject {
 
         loadedCommands = commands
         loadedActions = resolvedActions
+        promptLauncher = configuredPromptLauncher
+        promptLauncherSourcePath = configuredPromptLauncherSourcePath
         commandSourcePaths = sourcePaths
         actionLookup = resolvedActionLookup
         newWorkspaceActionID = configuredNewWorkspaceActionID

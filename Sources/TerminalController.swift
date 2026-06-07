@@ -20,12 +20,12 @@ extension Notification.Name {
     static let reactGrabDidCopySelection = Notification.Name("cmux.reactGrabDidCopySelection")
 }
 
-nonisolated private struct SocketLineProcessingResult: Sendable {
+private struct SocketLineProcessingResult: Sendable {
     let response: String?
     let authenticated: Bool
 }
 
-nonisolated private struct RemotePTYSocketTarget {
+private struct RemotePTYSocketTarget {
     let controller: WorkspaceRemoteSessionController?
     let windowId: UUID?
     let windowRef: Any
@@ -1991,6 +1991,8 @@ class TerminalController {
             return v2Result(id: id, self.v2NotificationOpen(params: params))
         case "notification.jump_to_unread":
             return v2Result(id: id, self.v2NotificationJumpToUnread())
+        case "sidebar.set_status":
+            return v2Result(id: id, self.v2SidebarSetStatus(params: params))
 
         // App focus
         case "app.focus_override.set":
@@ -2416,6 +2418,7 @@ class TerminalController {
             "notification.mark_read",
             "notification.open",
             "notification.jump_to_unread",
+            "sidebar.set_status",
             "app.focus_override.set",
             "app.simulate_active",
             "file.open",
@@ -9821,7 +9824,50 @@ class TerminalController {
         return result
     }
 
+    // MARK: - V2 Sidebar Methods
+
+    private func v2SidebarSetStatus(params: [String: Any]) -> V2CallResult {
+        guard let tabManager = v2ResolveTabManager(params: params) else {
+            return .err(code: "unavailable", message: "TabManager not available", data: nil)
+        }
+        guard let key = v2RawString(params, "key")?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !key.isEmpty else {
+            return .err(code: "invalid_params", message: "Missing required param: key", data: nil)
+        }
+        guard let value = v2RawString(params, "value") else {
+            return .err(code: "invalid_params", message: "Missing required param: value", data: nil)
+        }
+        let icon = (v2RawString(params, "icon") ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let color = (v2RawString(params, "color") ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let priority: Int
+        if let rawP = v2RawString(params, "priority"), let p = Int(rawP) {
+            priority = max(-9999, min(9999, p))
+        } else {
+            priority = 0
+        }
+        var result: V2CallResult = .ok(["key": key])
+        v2MainSync {
+            guard let ws = v2ResolveWorkspace(params: params, tabManager: tabManager) else {
+                result = .err(code: "not_found", message: "Workspace not found", data: nil)
+                return
+            }
+            let iconOpt: String? = icon.isEmpty ? nil : icon
+            let colorOpt: String? = color.isEmpty ? nil : color
+            guard Self.shouldReplaceStatusEntry(
+                current: ws.statusEntries[key],
+                key: key, value: value, icon: iconOpt, color: colorOpt,
+                url: nil, priority: priority, format: .plain
+            ) else { return }
+            ws.statusEntries[key] = SidebarStatusEntry(
+                key: key, value: value, icon: iconOpt, color: colorOpt,
+                url: nil, priority: priority, format: .plain, timestamp: Date()
+            )
+        }
+        return result
+    }
+
     // MARK: - V2 Notification Methods
+
 
     private func v2NotificationCreate(params: [String: Any]) -> V2CallResult {
         guard let tabManager = v2ResolveTabManager(params: params) else {
@@ -18771,20 +18817,20 @@ class TerminalController {
         }
 	        return result
 	    }
-	
+
 	    private func dragSurfaceToSplit(_ args: String) -> String {
 	        guard let tabManager = tabManager else { return "ERROR: TabManager not available" }
-	
+
 	        let trimmed = args.trimmingCharacters(in: .whitespacesAndNewlines)
 	        let parts = trimmed.split(separator: " ").map(String.init)
 	        guard parts.count >= 2 else { return "ERROR: Usage: drag_surface_to_split <id|idx> <left|right|up|down>" }
-	
+
 	        let surfaceArg = parts[0]
 	        let directionArg = parts[1]
 	        guard let direction = parseSplitDirection(directionArg) else {
 	            return "ERROR: Invalid direction. Use left, right, up, or down."
 	        }
-	
+
 	        let orientation: SplitOrientation = direction.isHorizontal ? .horizontal : .vertical
 	        let insertFirst = (direction == .left || direction == .up)
 
@@ -18803,7 +18849,7 @@ class TerminalController {
 	                return "ERROR: \(message)"
 	            }
 	        }
-	
+
 	        var result = "ERROR: Failed to move surface"
 	        v2MainSync {
 	            guard let tabId = tabManager.selectedTabId,
@@ -18811,13 +18857,13 @@ class TerminalController {
 	                result = "ERROR: No tab selected"
 	                return
 	            }
-	
+
 	            guard let panelId = resolveSurfaceId(from: surfaceArg, tab: tab),
 	                  let bonsplitTabId = tab.surfaceIdFromPanelId(panelId) else {
 	                result = "ERROR: Surface not found"
 	                return
 	            }
-	
+
 	            guard let newPaneId = tab.bonsplitController.splitPane(
 	                orientation: orientation,
 	                movingTab: bonsplitTabId,
@@ -18826,12 +18872,12 @@ class TerminalController {
 	                result = "ERROR: Failed to split pane"
 	                return
 	            }
-	
+
 	            result = "OK \(newPaneId.id.uuidString)"
 	        }
 	        return result
 	    }
-	
+
     private func newPane(_ args: String) -> String {
         guard let tabManager = tabManager else { return "ERROR: TabManager not available" }
 

@@ -1022,6 +1022,8 @@ struct WorkspaceGroup: Identifiable, Equatable, Sendable {
 
 @MainActor
 class TabManager: ObservableObject {
+    weak var cmuxConfigStore: CmuxConfigStore?
+
     private enum WorkspacePullRequestSnapshot: Equatable {
         case deferred
         case unsupportedRepository
@@ -2262,7 +2264,8 @@ class TabManager: ObservableObject {
             }
             if !keysToRemove.isEmpty {
                 for key in keysToRemove {
-                    tab.clearAgentPID(key: key, clearStatus: true, refreshPorts: false)
+                    tab.statusEntries.removeValue(forKey: key)
+                    tab.agentPIDs.removeValue(forKey: key)
                 }
                 let remainingAgentPIDs = Set(tab.agentPIDs.values.compactMap { $0 > 0 ? Int($0) : nil })
                 PortScanner.shared.refreshAgentPorts(workspaceId: tab.id, agentPIDs: remainingAgentPIDs)
@@ -5250,7 +5253,48 @@ class TabManager: ObservableObject {
                 selectedTabId = tabs[newIndex].id
             }
         }
+        triggerPromptLauncherCloseHook(workspace: workspace)
         publishCmuxWorkspaceClosed(workspace)
+    }
+
+    private func triggerPromptLauncherCloseHook(workspace: Workspace, delayBeforeRun: Bool = false) {
+        guard let cmuxConfigStore,
+              let promptLauncher = cmuxConfigStore.promptLauncher,
+              let shellCommand = SidebarPromptLauncherTemplateRenderer.renderCloseHook(
+                  config: promptLauncher,
+                  workspace: workspace
+              ),
+              CmuxConfigExecutor.isPromptLauncherTrusted(
+                  promptLauncher,
+                  configSourcePath: cmuxConfigStore.promptLauncherSourcePath,
+                  globalConfigPath: cmuxConfigStore.globalConfigPath
+              ) else {
+            return
+        }
+        let environment = promptLauncher.environment
+        let shouldForwardSocket = promptLauncher.forwardCmuxSocket
+        let socketPath = TerminalController.shared.currentSocketPathForRemoteRestore()
+        Task.detached(priority: .utility) {
+            if delayBeforeRun {
+                try? await Task.sleep(nanoseconds: 300_000_000)
+            }
+            #if DEBUG
+            cmuxDebugLog("promptLauncher.closeHook triggered command=\(shellCommand)")
+            #endif
+            let proc = Process()
+            proc.executableURL = URL(fileURLWithPath: "/bin/zsh")
+            proc.arguments = ["-l", "-c", shellCommand]
+            var env = ProcessInfo.processInfo.environment
+            for (key, value) in environment {
+                env[key] = value
+            }
+            if shouldForwardSocket, let socketPath {
+                env["CMUX_SOCKET_PATH"] = socketPath
+            }
+            proc.environment = env
+            proc.standardInput = FileHandle.nullDevice
+            try? proc.run()
+        }
     }
 
     /// If `closedWorkspaceId` was the anchor of any group, dissolve that group:
@@ -5637,7 +5681,7 @@ class TabManager: ObservableObject {
                 continue
             }
             targetPanelIds.append(panelId)
-            targetTitles.append(CloseOtherTabsConfirmationPrompt.displayTitle(workspace.panelTitle(panelId: panelId)))
+            targetTitles.append(closeOtherTabsDisplayTitle(workspace.panelTitle(panelId: panelId)))
         }
 
         guard !targetPanelIds.isEmpty else { return nil }
@@ -5646,6 +5690,17 @@ class TabManager: ObservableObject {
             panelIds: targetPanelIds,
             titles: targetTitles
         )
+    }
+
+    private func closeOtherTabsDisplayTitle(_ title: String?) -> String {
+        let collapsed = title?
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "\r", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if let collapsed, !collapsed.isEmpty {
+            return collapsed
+        }
+        return "Untitled Tab"
     }
 
     private func orderedClosableWorkspaces(_ workspaceIds: [UUID], allowPinned: Bool) -> [Workspace] {
@@ -5735,6 +5790,7 @@ class TabManager: ObservableObject {
         }
         if tabs.count <= 1 {
             // Last workspace in this window: match Close Workspace shortcut behavior.
+            triggerPromptLauncherCloseHook(workspace: workspace, delayBeforeRun: true)
             if let window {
                 window.performClose(nil)
             } else {
@@ -9498,7 +9554,7 @@ extension TabManager {
         surfaceResumeBindingIndex: SurfaceResumeBindingIndex? = nil
     ) -> SessionTabManagerSnapshot {
         let restorableTabs = tabs
-            .filter(\.isRestorableInSessionSnapshot)
+            .filter { !$0.isRemoteWorkspace }
             .prefix(SessionPersistencePolicy.maxWorkspacesPerWindow)
         let workspaceSnapshots = restorableTabs
             .map {

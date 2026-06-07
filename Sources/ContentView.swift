@@ -1282,7 +1282,7 @@ struct ContentView: View {
     }
 
     static func tmuxWorkspacePaneExactRect(
-        for panel: Panel,
+        for panel: any Panel,
         in contentView: NSView
     ) -> CGRect? {
         let targetView: NSView?
@@ -9977,6 +9977,9 @@ struct SidebarTabItemSettingsSnapshot: Equatable {
     let activeTabIndicatorStyle: SidebarActiveTabIndicatorStyle
     let selectionColorHex: String?
     let notificationBadgeColorHex: String?
+    let rowBackgroundMode: SidebarWorkspaceRowBackgroundMode
+    let inactiveCustomColorOpacity: Double
+    let inactiveCustomColorMultiSelectOpacity: Double
     let visibleAuxiliaryDetails: SidebarWorkspaceAuxiliaryDetailVisibility
     let iMessageModeEnabled: Bool
 
@@ -10038,6 +10041,9 @@ struct SidebarTabItemSettingsSnapshot: Equatable {
         activeTabIndicatorStyle = SidebarActiveTabIndicatorSettings.current(defaults: defaults)
         selectionColorHex = defaults.string(forKey: "sidebarSelectionColorHex")
         notificationBadgeColorHex = defaults.string(forKey: "sidebarNotificationBadgeColorHex")
+        rowBackgroundMode = SidebarWorkspaceRowBackgroundSettings.mode(defaults: defaults)
+        inactiveCustomColorOpacity = SidebarWorkspaceRowBackgroundSettings.inactiveOpacity(defaults: defaults)
+        inactiveCustomColorMultiSelectOpacity = SidebarWorkspaceRowBackgroundSettings.inactiveMultiSelectOpacity(defaults: defaults)
         iMessageModeEnabled = IMessageModeSettings.isEnabled(defaults: defaults)
     }
 
@@ -10992,8 +10998,11 @@ struct VerticalTabsSidebar: View {
             } else {
                 extensionSidebarScrollArea(renderContext: renderContext)
             }
-            SidebarFooter(updateViewModel: updateViewModel, fileExplorerState: fileExplorerState, onSendFeedback: onSendFeedback)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            VStack(spacing: 0) {
+                SidebarPromptLauncher()
+                SidebarFooter(updateViewModel: updateViewModel, fileExplorerState: fileExplorerState, onSendFeedback: onSendFeedback)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
         .accessibilityIdentifier("Sidebar")
         .ignoresSafeArea()
@@ -13597,6 +13606,636 @@ final class WindowScopedShortcutHintModifierMonitor {
     }
 }
 
+private struct PromptTextEditor: NSViewRepresentable {
+    @Binding var text: String
+    let placeholder: String
+    var isEditable: Bool = true
+    var onSubmit: (() -> Void)?
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let scrollView = NSTextView.scrollableTextView()
+        scrollView.drawsBackground = false
+        scrollView.hasVerticalScroller = true
+        scrollView.autohidesScrollers = true
+        guard let tv = scrollView.documentView as? NSTextView else { return scrollView }
+        tv.delegate = context.coordinator
+        tv.font = .systemFont(ofSize: 12)
+        tv.isRichText = false
+        tv.drawsBackground = false
+        tv.isAutomaticQuoteSubstitutionEnabled = false
+        tv.isAutomaticDashSubstitutionEnabled = false
+        tv.textContainerInset = NSSize(width: 4, height: 4)
+        tv.textContainer?.lineFragmentPadding = 4
+        tv.textContainer?.widthTracksTextView = true
+        return scrollView
+    }
+
+    func updateNSView(_ scrollView: NSScrollView, context: Context) {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { updateNSView(scrollView, context: context) }
+            return
+        }
+        guard let tv = scrollView.documentView as? NSTextView else { return }
+        if tv.string != text { tv.string = text }
+        if tv.isEditable != isEditable { tv.isEditable = isEditable }
+        let targetColor: NSColor = isEditable ? .labelColor : .placeholderTextColor
+        if tv.textColor != targetColor { tv.textColor = targetColor }
+        context.coordinator.parent = self
+        let isEmpty = tv.string.isEmpty
+        if isEmpty != context.coordinator.showingPlaceholder {
+            context.coordinator.showingPlaceholder = isEmpty
+            tv.needsDisplay = true
+        }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
+
+    final class Coordinator: NSObject, NSTextViewDelegate {
+        var parent: PromptTextEditor
+        var showingPlaceholder: Bool = true
+
+        init(parent: PromptTextEditor) { self.parent = parent }
+
+        func textDidChange(_ notification: Notification) {
+            guard let tv = notification.object as? NSTextView else { return }
+            parent.text = tv.string
+        }
+
+        func textView(_ textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+            if selector == #selector(NSTextView.insertNewline(_:)) {
+                parent.onSubmit?()
+                return true
+            }
+            return false
+        }
+    }
+}
+
+private struct PromptTextEditorContainer: View {
+    @Binding var text: String
+    let placeholder: String
+    var isEditable: Bool = true
+    var onSubmit: (() -> Void)?
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            if text.isEmpty {
+                Text(placeholder)
+                    .font(.system(size: 12))
+                    .foregroundColor(Color(NSColor.placeholderTextColor))
+                    .padding(.leading, 9)
+                    .padding(.top, 7)
+                    .allowsHitTesting(false)
+            }
+            PromptTextEditor(text: $text, placeholder: placeholder,
+                             isEditable: isEditable, onSubmit: onSubmit)
+        }
+        .background(
+            RoundedRectangle(cornerRadius: 5)
+                .fill(Color(NSColor.controlBackgroundColor))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 5)
+                .stroke(Color(NSColor.separatorColor), lineWidth: 0.5)
+        )
+    }
+}
+
+struct SidebarPromptLauncherWorkspaceMetadata: Equatable {
+    var workspace: String?
+    var title: String?
+    var description: String?
+    var color: String?
+    var slot: String?
+}
+
+enum SidebarPromptLauncherTemplateRenderer {
+    static func renderCommand(
+        config: CmuxPromptLauncherDefinition,
+        targetID: String,
+        providerID: String,
+        prompt: String
+    ) -> String? {
+        guard let target = config.targets.first(where: { $0.id == targetID }),
+              let provider = config.providers.first(where: { $0.id == providerID }) else {
+            return nil
+        }
+        return renderTemplate(
+            config.command,
+            values: [
+                "prompt": shellQuote(prompt),
+                "target.id": shellQuote(target.id),
+                "target.title": shellQuote(target.title),
+                "target.args": shellArguments(target.args),
+                "environment.id": shellQuote(target.id),
+                "environment.title": shellQuote(target.title),
+                "environment.args": shellArguments(target.args),
+                "environment.arguments": shellArguments(target.args),
+                "provider.id": shellQuote(provider.id),
+                "provider.title": shellQuote(provider.title),
+                "provider.args": shellArguments(provider.args),
+                "provider.arguments": shellArguments(provider.args),
+            ]
+        )
+    }
+
+    @MainActor
+    static func renderCloseHook(
+        config: CmuxPromptLauncherDefinition,
+        workspace: Workspace
+    ) -> String? {
+        guard let closeHook = config.closeHook else { return nil }
+        let slot = workspace.promptLauncherSlot ?? defaultSlot(fromWorkspaceTitle: workspace.title)
+        var values: [String: String] = [
+            "workspace.id": shellQuote(workspace.id.uuidString),
+            "workspace.title": shellQuote(workspace.title),
+        ]
+        if let description = workspace.customDescription {
+            values["workspace.description"] = shellQuote(description)
+        }
+        if let color = workspace.customColor {
+            values["workspace.color"] = shellQuote(color)
+        }
+        if let slot {
+            values["workspace.slot"] = shellQuote(slot)
+        }
+        return renderTemplate(
+            closeHook,
+            values: values
+        )
+    }
+
+    static func metadata(from line: String, prefix: String?) -> SidebarPromptLauncherWorkspaceMetadata? {
+        guard let prefix, line.hasPrefix(prefix) else { return nil }
+        let rawJSON = String(line.dropFirst(prefix.count))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let data = rawJSON.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        return SidebarPromptLauncherWorkspaceMetadata(
+            workspace: firstString(in: object, keys: [
+                "workspace", "workspaceRef", "workspace_ref", "workspaceId", "workspace_id"
+            ]),
+            title: firstString(in: object, keys: ["title", "name"]),
+            description: firstString(in: object, keys: ["description"]),
+            color: firstString(in: object, keys: ["color", "workspaceColor", "workspace_color"]),
+            slot: firstString(in: object, keys: ["slot", "workspaceSlot", "workspace_slot"])
+        )
+    }
+
+    static func shellQuote(_ value: String) -> String {
+        "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
+    }
+
+    static func stripAnsi(_ s: String) -> String {
+        guard let regex = try? NSRegularExpression(pattern: #"\x1B\[[0-9;]*[A-Za-z]|\r"#) else { return s }
+        return regex.stringByReplacingMatches(in: s, range: NSRange(s.startIndex..., in: s), withTemplate: "")
+    }
+
+    static func isCompletionLine(_ line: String, patterns: [String]) -> Bool {
+        patterns.contains { pattern in
+            !pattern.isEmpty && line.contains(pattern)
+        }
+    }
+
+    static func defaultSlot(fromWorkspaceTitle title: String) -> String? {
+        guard let regex = try? NSRegularExpression(pattern: #"\[(?:wk)?([0-9]+)\]"#) else {
+            return nil
+        }
+        let range = NSRange(title.startIndex..., in: title)
+        guard let match = regex.firstMatch(in: title, range: range),
+              match.numberOfRanges > 1,
+              let digitRange = Range(match.range(at: 1), in: title) else {
+            return nil
+        }
+        return "wk\(title[digitRange])"
+    }
+
+    private static func shellArguments(_ values: [String]) -> String {
+        values.map(shellQuote).joined(separator: " ")
+    }
+
+    private static func renderTemplate(_ template: String, values: [String: String]) -> String? {
+        guard let regex = try? NSRegularExpression(pattern: #"\{\{\s*([A-Za-z0-9_.]+)\s*\}\}"#) else {
+            return template
+        }
+        var rendered = template
+        let matches = regex.matches(in: template, range: NSRange(template.startIndex..., in: template))
+        for match in matches.reversed() {
+            guard match.numberOfRanges > 1,
+                  let fullRange = Range(match.range(at: 0), in: rendered),
+                  let keyRange = Range(match.range(at: 1), in: template) else {
+                return nil
+            }
+            let key = String(template[keyRange])
+            guard let replacement = values[key] else {
+                return nil
+            }
+            rendered.replaceSubrange(fullRange, with: replacement)
+        }
+        return rendered.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : rendered
+    }
+
+    private static func firstString(in object: [String: Any], keys: [String]) -> String? {
+        for key in keys {
+            guard let value = object[key] as? String else { continue }
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                return trimmed
+            }
+        }
+        return nil
+    }
+}
+
+@MainActor
+private final class PromptLauncherModel: ObservableObject {
+    @Published var promptText: String = ""
+    @Published var selectedTarget: String = ""
+    @Published var selectedProvider: String = ""
+    @Published var isLoading: Bool = false
+
+    private struct RunResult {
+        let succeeded: Bool
+        let message: String?
+    }
+
+    private var lastLogLine: String = ""
+    private var dotPhase: Int = 0
+    private var dotCancellable: AnyCancellable?
+
+    func configure(_ config: CmuxPromptLauncherDefinition) {
+        if !config.targets.contains(where: { $0.id == selectedTarget }) {
+            selectedTarget = config.selectedDefaultTargetID
+        }
+        if !config.providers.contains(where: { $0.id == selectedProvider }) {
+            selectedProvider = config.selectedDefaultProviderID
+        }
+    }
+
+    func launch(
+        config: CmuxPromptLauncherDefinition,
+        tabManager: TabManager,
+        configSourcePath: String?,
+        globalConfigPath: String
+    ) {
+        configure(config)
+        let prompt = promptText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !prompt.isEmpty, !isLoading else { return }
+        guard let shellCmd = SidebarPromptLauncherTemplateRenderer.renderCommand(
+            config: config,
+            targetID: selectedTarget,
+            providerID: selectedProvider,
+            prompt: prompt
+        ) else {
+            return
+        }
+
+        #if DEBUG
+        cmuxDebugLog("promptLauncher.command rendered=\(shellCmd)")
+        #endif
+        CmuxConfigExecutor.authorizePromptLauncherIfNeeded(
+            promptLauncher: config,
+            renderedCommand: shellCmd,
+            configSourcePath: configSourcePath,
+            globalConfigPath: globalConfigPath
+        ) { [weak self, weak tabManager] in
+            guard let self, let tabManager else { return }
+            self.startLaunch(
+                shellCmd: shellCmd,
+                config: config,
+                prompt: prompt,
+                tabManager: tabManager
+            )
+        }
+    }
+
+    private func startLaunch(
+        shellCmd: String,
+        config: CmuxPromptLauncherDefinition,
+        prompt _: String,
+        tabManager: TabManager
+    ) {
+        isLoading = true
+        lastLogLine = ""
+        promptText = ""
+        startDotAnimation()
+        Task { @MainActor in
+            let result = await runPromptCommand(shellCmd: shellCmd, config: config, tabManager: tabManager)
+            stopDotAnimation()
+            isLoading = false
+            if result.succeeded {
+                promptText = ""
+            } else {
+                let message = result.message?.trimmingCharacters(in: .whitespacesAndNewlines)
+                promptText = (message?.isEmpty == false) ? message! : String(localized: "sidebar.prompt_launcher.failed",
+                                                                              defaultValue: "Prompt launcher failed")
+            }
+        }
+    }
+
+    private func startDotAnimation() {
+        dotPhase = 0
+        dotCancellable = Timer.publish(every: 0.4, on: .main, in: .common)
+            .autoconnect()
+            .sink { [weak self] _ in
+                guard let self else { return }
+                self.dotPhase = (self.dotPhase + 1) % 4
+                self.refreshPromptText()
+            }
+    }
+
+    private func stopDotAnimation() {
+        dotCancellable?.cancel()
+        dotCancellable = nil
+    }
+
+    private func refreshPromptText() {
+        let dots = String(repeating: ".", count: dotPhase)
+        promptText = lastLogLine.isEmpty ? dots : "\(lastLogLine)\(dots)"
+    }
+
+    private func setLastLogLine(_ line: String) {
+        lastLogLine = line
+        refreshPromptText()
+    }
+
+    private func runPromptCommand(
+        shellCmd: String,
+        config: CmuxPromptLauncherDefinition,
+        tabManager: TabManager
+    ) async -> RunResult {
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/bin/zsh")
+        proc.arguments = ["-l", "-c", shellCmd]
+
+        var env = ProcessInfo.processInfo.environment
+        for (key, value) in config.environment {
+            env[key] = value
+        }
+        if config.forwardCmuxSocket {
+            env["CMUX_SOCKET_PATH"] = SocketControlSettings.socketPath()
+        }
+        proc.environment = env
+
+        let pipe = Pipe()
+        proc.standardOutput = pipe
+        proc.standardError = pipe
+        proc.standardInput = FileHandle.nullDevice
+
+        return await withCheckedContinuation { [weak self] (cont: CheckedContinuation<RunResult, Never>) in
+            // Thread-safe single-fire unlock: resume the continuation exactly once,
+            // either when the workspace appears in cmux or when the process exits.
+            let lock = NSLock()
+            var resumed = false
+            var latestLine = ""
+            let updateLatestLine: (String) -> Void = { line in
+                lock.lock(); defer { lock.unlock() }
+                latestLine = line
+            }
+            let currentLatestLine: () -> String = {
+                lock.lock(); defer { lock.unlock() }
+                return latestLine
+            }
+            let resume: (RunResult) -> Void = { result in
+                lock.lock(); defer { lock.unlock() }
+                guard !resumed else { return }
+                resumed = true
+                cont.resume(returning: result)
+            }
+
+            pipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
+                let data = handle.availableData
+                guard !data.isEmpty,
+                      let str = String(data: data, encoding: .utf8) else { return }
+                let newLines = SidebarPromptLauncherTemplateRenderer.stripAnsi(str)
+                    .components(separatedBy: "\n")
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .filter { !$0.isEmpty }
+                guard let last = newLines.last else { return }
+                updateLatestLine(last)
+                #if DEBUG
+                for line in newLines {
+                    cmuxDebugLog("promptLauncher.output \(line)")
+                }
+                #endif
+                Task { @MainActor [weak self, weak tabManager] in
+                    self?.setLastLogLine(last)
+                    guard let tabManager else { return }
+                    for line in newLines {
+                        if let metadata = SidebarPromptLauncherTemplateRenderer.metadata(
+                            from: line,
+                            prefix: config.metadataPrefix
+                        ) {
+                            #if DEBUG
+                            cmuxDebugLog("promptLauncher.metadata workspace=\(metadata.workspace ?? "nil") title=\(metadata.title ?? "nil") color=\(metadata.color ?? "nil") slot=\(metadata.slot ?? "nil")")
+                            #endif
+                            self?.applyMetadata(metadata, tabManager: tabManager)
+                        }
+                    }
+                }
+                if newLines.contains(where: {
+                    SidebarPromptLauncherTemplateRenderer.isCompletionLine($0, patterns: config.completionPatterns)
+                }) {
+                    pipe.fileHandleForReading.readabilityHandler = nil
+                    #if DEBUG
+                    cmuxDebugLog("promptLauncher.completionPattern matched")
+                    #endif
+                    resume(RunResult(succeeded: true, message: nil))
+                }
+            }
+            proc.terminationHandler = { process in
+                pipe.fileHandleForReading.readabilityHandler = nil
+                let status = process.terminationStatus
+                #if DEBUG
+                cmuxDebugLog("promptLauncher.exit status=\(status)")
+                #endif
+                let succeeded = status == 0
+                let message = succeeded ? nil : currentLatestLine()
+                resume(RunResult(succeeded: succeeded, message: message))
+            }
+            do {
+                try proc.run()
+            } catch {
+                pipe.fileHandleForReading.readabilityHandler = nil
+                #if DEBUG
+                cmuxDebugLog("promptLauncher.launchError \(error.localizedDescription)")
+                #endif
+                resume(RunResult(succeeded: false, message: error.localizedDescription))
+            }
+        }
+    }
+
+    private func applyMetadata(
+        _ metadata: SidebarPromptLauncherWorkspaceMetadata,
+        tabManager: TabManager
+    ) {
+        guard let workspace = resolveWorkspace(metadata.workspace, tabManager: tabManager) else {
+            return
+        }
+        if let title = metadata.title {
+            tabManager.setCustomTitle(tabId: workspace.id, title: title)
+        }
+        if let description = metadata.description {
+            tabManager.setCustomDescription(tabId: workspace.id, description: description)
+        }
+        if let color = metadata.color,
+           let resolvedColor = WorkspaceTabColorSettings.resolvedColorHex(color) {
+            tabManager.setTabColor(tabId: workspace.id, color: resolvedColor)
+        }
+        if let slot = metadata.slot?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !slot.isEmpty {
+            workspace.promptLauncherSlot = slot
+        }
+    }
+
+    private func resolveWorkspace(
+        _ rawHandle: String?,
+        tabManager: TabManager
+    ) -> Workspace? {
+        guard let rawHandle else { return nil }
+        let handle = rawHandle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !handle.isEmpty else { return nil }
+        if let uuid = UUID(uuidString: handle) {
+            return tabManager.tabs.first(where: { $0.id == uuid })
+        }
+        if handle.hasPrefix("workspace:") {
+            let suffix = String(handle.dropFirst("workspace:".count))
+            if let uuid = UUID(uuidString: suffix) {
+                return tabManager.tabs.first(where: { $0.id == uuid })
+            }
+            if let index = Int(suffix), index > 0, index <= tabManager.tabs.count {
+                return tabManager.tabs[index - 1]
+            }
+        }
+        if let index = Int(handle), index > 0, index <= tabManager.tabs.count {
+            return tabManager.tabs[index - 1]
+        }
+        return nil
+    }
+}
+
+private struct PromptLauncherArrowCursorArea: NSViewRepresentable {
+    func makeNSView(context: Context) -> ArrowCursorView { ArrowCursorView() }
+    func updateNSView(_ nsView: ArrowCursorView, context: Context) {}
+
+    class ArrowCursorView: NSView {
+        override func resetCursorRects() {
+            discardCursorRects()
+            addCursorRect(bounds, cursor: .arrow)
+        }
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    }
+}
+
+private struct SpinningCircleButton: View {
+    @State private var rotation: Double = 0
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .stroke(Color.accentColor.opacity(0.25), lineWidth: 2)
+                .frame(width: 24, height: 24)
+            Circle()
+                .trim(from: 0, to: 0.65)
+                .stroke(Color.accentColor, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                .frame(width: 24, height: 24)
+                .rotationEffect(.degrees(rotation))
+        }
+        .onAppear {
+            withAnimation(.linear(duration: 0.9).repeatForever(autoreverses: false)) {
+                rotation = 360
+            }
+        }
+    }
+}
+
+private struct SidebarPromptLauncher: View {
+    @StateObject private var model = PromptLauncherModel()
+    @EnvironmentObject var tabManager: TabManager
+    @EnvironmentObject var cmuxConfigStore: CmuxConfigStore
+
+    var body: some View {
+        Group {
+            if let config = cmuxConfigStore.promptLauncher {
+                VStack(alignment: .leading, spacing: 4) {
+                    PromptTextEditorContainer(
+                        text: $model.promptText,
+                        placeholder: String(localized: "sidebar.prompt_launcher.placeholder",
+                                            defaultValue: "Prompt\u{2026}"),
+                        isEditable: !model.isLoading,
+                        onSubmit: {
+                            model.launch(
+                                config: config,
+                                tabManager: tabManager,
+                                configSourcePath: cmuxConfigStore.promptLauncherSourcePath,
+                                globalConfigPath: cmuxConfigStore.globalConfigPath
+                            )
+                        }
+                    )
+                    .frame(height: 120)
+
+                    HStack(spacing: 6) {
+                        Picker(selection: $model.selectedTarget, label: EmptyView()) {
+                            ForEach(config.targets, id: \.id) { target in
+                                Text(target.title).font(.system(size: 10)).tag(target.id)
+                            }
+                        }
+                        .controlSize(.small)
+                        .frame(maxWidth: 110)
+
+                        Picker(selection: $model.selectedProvider, label: EmptyView()) {
+                            ForEach(config.providers, id: \.id) { provider in
+                                Text(provider.title).font(.system(size: 10)).tag(provider.id)
+                            }
+                        }
+                        .controlSize(.small)
+                        .frame(maxWidth: 100)
+
+                        Spacer()
+
+                        if model.isLoading {
+                            SpinningCircleButton()
+                        } else {
+                            Button {
+                                model.launch(
+                                    config: config,
+                                    tabManager: tabManager,
+                                    configSourcePath: cmuxConfigStore.promptLauncherSourcePath,
+                                    globalConfigPath: cmuxConfigStore.globalConfigPath
+                                )
+                            } label: {
+                                ZStack {
+                                    Circle()
+                                        .fill(Color.accentColor)
+                                        .frame(width: 24, height: 24)
+                                    Image(systemName: "arrow.up")
+                                        .font(.system(size: 11, weight: .bold))
+                                        .foregroundColor(.white)
+                                }
+                            }
+                            .buttonStyle(.plain)
+                            .keyboardShortcut(.return, modifiers: [.command])
+                            .accessibilityLabel(String(localized: "sidebar.prompt_launcher.send",
+                                                       defaultValue: "Send"))
+                        }
+                    }
+                    .overlay(PromptLauncherArrowCursorArea())
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .overlay(alignment: .top) { Divider() }
+                .onAppear { model.configure(config) }
+                .onChange(of: config) { _, newConfig in
+                    model.configure(newConfig)
+                }
+            }
+        }
+    }
+}
+
 private struct SidebarFooter: View {
     var updateViewModel: UpdateStateModel
     @ObservedObject var fileExplorerState: FileExplorerState
@@ -15230,6 +15869,18 @@ struct TabItemView: View, Equatable {
         settings.notificationBadgeColorHex
     }
 
+    private var rowBackgroundMode: SidebarWorkspaceRowBackgroundMode {
+        settings.rowBackgroundMode
+    }
+
+    private var inactiveCustomColorOpacity: Double {
+        settings.inactiveCustomColorOpacity
+    }
+
+    private var inactiveCustomColorMultiSelectOpacity: Double {
+        settings.inactiveCustomColorMultiSelectOpacity
+    }
+
     private var selectedWorkspaceBackgroundNSColor: NSColor {
         sidebarSelectedWorkspaceBackgroundNSColor(
             for: colorScheme,
@@ -15237,9 +15888,24 @@ struct TabItemView: View, Equatable {
         )
     }
 
+    private var activeWorkspaceBackgroundNSColor: NSColor {
+        let style = sidebarWorkspaceRowBackgroundStyle(
+            activeTabIndicatorStyle: activeTabIndicatorStyle,
+            isActive: isActive,
+            isMultiSelected: isMultiSelected,
+            customColorHex: workspaceSnapshot.customColorHex,
+            colorScheme: colorScheme,
+            sidebarSelectionColorHex: sidebarSelectionColorHex,
+            rowBackgroundMode: rowBackgroundMode,
+            inactiveCustomColorOpacity: inactiveCustomColorOpacity,
+            inactiveCustomColorMultiSelectOpacity: inactiveCustomColorMultiSelectOpacity
+        )
+        return style.color ?? selectedWorkspaceBackgroundNSColor
+    }
+
     private func selectedWorkspaceForegroundNSColor(opacity: CGFloat) -> NSColor {
         sidebarSelectedWorkspaceForegroundNSColor(
-            on: selectedWorkspaceBackgroundNSColor,
+            on: activeWorkspaceBackgroundNSColor,
             opacity: opacity
         )
     }
@@ -16235,7 +16901,10 @@ struct TabItemView: View, Equatable {
             isMultiSelected: isMultiSelected,
             customColorHex: workspaceSnapshot.customColorHex,
             colorScheme: colorScheme,
-            sidebarSelectionColorHex: sidebarSelectionColorHex
+            sidebarSelectionColorHex: sidebarSelectionColorHex,
+            rowBackgroundMode: rowBackgroundMode,
+            inactiveCustomColorOpacity: inactiveCustomColorOpacity,
+            inactiveCustomColorMultiSelectOpacity: inactiveCustomColorMultiSelectOpacity
         )
         guard let color = style.color else { return .clear }
         return Color(nsColor: color).opacity(style.opacity)

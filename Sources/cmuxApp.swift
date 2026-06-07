@@ -3457,7 +3457,6 @@ private struct TabBarBackdropLabView: View {
             fadeWidth: interpolate(strong: 20, production: production.fadeWidth, soft: 240),
             contentFadeWidth: interpolate(strong: 0, production: production.contentFadeWidth, soft: 80),
             solidWidth: interpolate(strong: 72, production: production.solidWidth, soft: 0),
-            solidSurfaceWidthAdjustment: production.solidSurfaceWidthAdjustment,
             fadeRampStartFraction: interpolate(strong: 0, production: production.fadeRampStartFraction, soft: 0.98),
             leadingOpacity: production.leadingOpacity,
             trailingOpacity: interpolate(strong: 1.0, production: production.trailingOpacity, soft: 0.25),
@@ -4912,7 +4911,7 @@ enum QuitWarningSettings {
     }
 }
 
-nonisolated enum QuitConfirmationMode: String, CaseIterable, Sendable {
+enum QuitConfirmationMode: String, CaseIterable, Sendable {
     case always
     case dirtyOnly = "dirty-only"
     case never
@@ -4929,7 +4928,7 @@ nonisolated enum QuitConfirmationMode: String, CaseIterable, Sendable {
     }
 }
 
-nonisolated enum BuildFlavor: String, Sendable {
+enum BuildFlavor: String, Sendable {
     case dev
     case nightly
     case stable

@@ -50,8 +50,8 @@ public actor FileWatcher {
     private let rawContinuation: AsyncStream<Void>.Continuation
     // File-descriptor lifetime is owned by each source's `setCancelHandler`,
     // which calls `close(fd)` exactly once when the source's cancel completes.
-    private var fileSource: (any DispatchSourceFileSystemObject)?
-    private var directorySource: (any DispatchSourceFileSystemObject)?
+    private var fileSource: FileSystemSourceBox?
+    private var directorySource: FileSystemSourceBox?
     private var watchedDirectory: String?
     private var throttleTask: Task<Void, Never>?
     private var isStopped = false
@@ -171,7 +171,7 @@ public actor FileWatcher {
         eventMask: DispatchSource.FileSystemEvent,
         queue: DispatchQueue,
         rawContinuation: AsyncStream<Void>.Continuation
-    ) -> (any DispatchSourceFileSystemObject)? {
+    ) -> FileSystemSourceBox? {
         let fd = open(path, O_EVTONLY)
         guard fd >= 0 else { return nil }
         let source = DispatchSource.makeFileSystemObjectSource(
@@ -182,7 +182,7 @@ public actor FileWatcher {
         source.setEventHandler { rawContinuation.yield(()) }
         source.setCancelHandler { close(fd) }
         source.resume()
-        return source
+        return FileSystemSourceBox(source)
     }
 
     /// Reacts to a raw source event: re-evaluate which ancestor directory to
@@ -234,5 +234,18 @@ public actor FileWatcher {
         )
         fileSource?.cancel()
         fileSource = newFileSource
+    }
+
+    private final class FileSystemSourceBox: @unchecked Sendable {
+        private var source: (any DispatchSourceFileSystemObject)?
+
+        init(_ source: any DispatchSourceFileSystemObject) {
+            self.source = source
+        }
+
+        func cancel() {
+            source?.cancel()
+            source = nil
+        }
     }
 }

@@ -930,7 +930,7 @@ extension Workspace {
         return !hasTerminalThatWillAuthenticateReconnect
     }
 
-    nonisolated enum SurfaceResumeStartupLaunch {
+    enum SurfaceResumeStartupLaunch {
         case command(String)
         case input(String)
 
@@ -10340,6 +10340,7 @@ final class Workspace: Identifiable, ObservableObject {
     @Published var customColor: String?  // hex string, e.g. "#C0392B"
     // Legacy in-memory state for old helpers/tests. Product UI, rendering, and
     // session persistence no longer honor per-workspace scrollbar overrides.
+    var promptLauncherSlot: String?
     @Published private(set) var terminalScrollBarHidden: Bool = false
     @Published var currentDirectory: String {
         didSet {
@@ -10493,7 +10494,7 @@ final class Workspace: Identifiable, ObservableObject {
         case terminalFirstResponder
     }
 
-    nonisolated enum RestoredPanelUnreadIndicator: Equatable, Sendable {
+    enum RestoredPanelUnreadIndicator: Equatable, Sendable {
         case visualOnly
         case workspaceUnread
 
