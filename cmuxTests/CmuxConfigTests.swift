@@ -119,6 +119,74 @@ final class CmuxConfigDecodingTests: XCTestCase {
         XCTAssertTrue(hook.enabled)
     }
 
+    func testDecodePromptLauncherConfig() throws {
+        let json = """
+        {
+          "promptLauncher": {
+            "command": "workspace-launch {{provider.args}} {{target.args}} {{prompt}}",
+            "targets": [
+              { "id": "auto", "args": [] },
+              { "id": "local", "args": ["local"] }
+            ],
+            "providers": [
+              { "id": "claude", "args": [] },
+              { "id": "codex", "title": "Codex", "args": ["codex"] }
+            ],
+            "defaultTarget": "auto",
+            "defaultProvider": "claude",
+            "metadataPrefix": "CMUX_WORKSPACE_JSON:",
+            "closeHook": "workspace-reset {{workspace.slot}}"
+          }
+        }
+        """
+
+        let launcher = try XCTUnwrap(try decode(json).promptLauncher)
+        XCTAssertEqual(launcher.command, "workspace-launch {{provider.args}} {{target.args}} {{prompt}}")
+        XCTAssertEqual(launcher.targets.map(\.id), ["auto", "local"])
+        XCTAssertEqual(launcher.providers.map(\.id), ["claude", "codex"])
+        XCTAssertEqual(launcher.providers[1].title, "Codex")
+        XCTAssertEqual(launcher.defaultTarget, "auto")
+        XCTAssertEqual(launcher.defaultProvider, "claude")
+        XCTAssertEqual(launcher.completionPatterns, CmuxPromptLauncherDefinition.defaultCompletionPatterns)
+        XCTAssertEqual(launcher.metadataPrefix, "CMUX_WORKSPACE_JSON:")
+        XCTAssertEqual(launcher.closeHook, "workspace-reset {{workspace.slot}}")
+        XCTAssertTrue(launcher.forwardCmuxSocket)
+    }
+
+    func testDecodePromptLauncherSupportsLegacyEnvironmentNames() throws {
+        let json = """
+        {
+          "promptLauncher": {
+            "command": "workspace-launch {{environment.arguments}} {{prompt}}",
+            "environments": [{ "id": "remote", "arguments": ["remote"] }],
+            "providers": [{ "id": "claude" }],
+            "defaultEnvironment": "remote",
+            "metadataLinePrefix": "META:"
+          }
+        }
+        """
+
+        let launcher = try XCTUnwrap(try decode(json).promptLauncher)
+        XCTAssertEqual(launcher.targets.map(\.id), ["remote"])
+        XCTAssertEqual(launcher.targets[0].args, ["remote"])
+        XCTAssertEqual(launcher.defaultTarget, "remote")
+        XCTAssertEqual(launcher.metadataPrefix, "META:")
+    }
+
+    func testDecodePromptLauncherRejectsEmptyTargets() {
+        let json = """
+        {
+          "promptLauncher": {
+            "command": "workspace-launch {{prompt}}",
+            "targets": [],
+            "providers": [{ "id": "claude" }]
+          }
+        }
+        """
+
+        XCTAssertThrowsError(try decode(json))
+    }
+
     func testDecodeNotificationHookRejectsBlankCommand() {
         let json = """
         {

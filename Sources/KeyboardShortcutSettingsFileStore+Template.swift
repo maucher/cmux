@@ -142,6 +142,9 @@ extension CmuxSettingsFileStore {
                     "indicatorStyle": SidebarActiveTabIndicatorSettings.defaultStyle.rawValue,
                     "selectionColor": NSNull(),
                     "notificationBadgeColor": NSNull(),
+                    "rowBackgroundMode": SidebarWorkspaceRowBackgroundSettings.defaultMode.rawValue,
+                    "inactiveOpacity": SidebarWorkspaceRowBackgroundSettings.defaultInactiveOpacity,
+                    "inactiveMultiSelectOpacity": SidebarWorkspaceRowBackgroundSettings.defaultInactiveMultiSelectOpacity,
                     "colors": Dictionary(
                         uniqueKeysWithValues: WorkspaceTabColorSettings.defaultPalette.map { ($0.name, $0.hex) }
                     ),

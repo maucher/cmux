@@ -1,6 +1,10 @@
 internal import Darwin
 internal import Foundation
 
+private struct DispatchReadSourceBox: @unchecked Sendable {
+    let source: any DispatchSourceRead
+}
+
 extension SocketControlServer {
     /// Arms the accept read source for `listenerSocket` under `generation`.
     ///
@@ -222,18 +226,19 @@ extension SocketControlServer {
         // independently, so no cancellation hook is needed for correctness.
         // The stage-3 actor conversion replaces this with an injected Clock.
         let deadline = DispatchTime.now() + .milliseconds(delayMs)
-        socketListenerQueue.asyncAfter(deadline: deadline) { [weak self, sourceToPause] in
+        let sourceToPauseBox = DispatchReadSourceBox(source: sourceToPause)
+        socketListenerQueue.asyncAfter(deadline: deadline) { [weak self, sourceToPauseBox] in
             guard let self else { return }
             self.withListenerState { state in
                 guard state.activeAcceptLoopGeneration == generation,
                       state.serverSocket == listenerSocket,
                       state.isRunning,
                       let activeSource = state.listenerReadSource,
-                      activeSource === sourceToPause,
+                      activeSource === sourceToPauseBox.source,
                       state.listenerReadSourceSuspended else {
                     return
                 }
-                sourceToPause.resume()
+                sourceToPauseBox.source.resume()
                 state.listenerReadSourceSuspended = false
             }
         }
