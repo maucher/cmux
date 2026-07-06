@@ -10598,6 +10598,7 @@ final class Workspace: Identifiable, ObservableObject {
     var agentPIDPanelIdsByKey: [String: UUID] = [:]
     var agentPIDKeysByPanelId: [UUID: Set<String>] = [:]
     var agentLifecycleStatesByPanelId: [UUID: [String: AgentHibernationLifecycleState]] = [:]
+    @Published private var sidebarAgentLifecycleRevision: UInt64 = 0
     var restoredTerminalScrollbackByPanelId: [UUID: String] = [:]
 #if DEBUG
     var debugSessionSnapshotScrollbackFallbackPanelIds: Set<UUID> = []
@@ -10663,6 +10664,7 @@ final class Workspace: Identifiable, ObservableObject {
             sidebarObservationSignal($remoteConnectionState),
             sidebarObservationSignal($remoteConnectionDetail),
             sidebarObservationSignal($activeRemoteTerminalSessionCount),
+            sidebarObservationSignal($sidebarAgentLifecycleRevision),
             sidebarObservationSignal($listeningPorts),
         ]
 
@@ -12398,6 +12400,7 @@ final class Workspace: Identifiable, ObservableObject {
     }
 
     private func recordAgentLifecycleChange(panelId: UUID) {
+        sidebarAgentLifecycleRevision &+= 1
         AgentHibernationController.shared.recordAgentLifecycleChange(
             workspaceId: id,
             panelId: panelId

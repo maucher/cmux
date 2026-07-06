@@ -1993,6 +1993,8 @@ class TerminalController {
             return v2Result(id: id, self.v2NotificationJumpToUnread())
         case "sidebar.set_status":
             return v2Result(id: id, self.v2SidebarSetStatus(params: params))
+        case "sidebar.clear_status":
+            return v2Result(id: id, self.v2SidebarClearStatus(params: params))
 
         // App focus
         case "app.focus_override.set":
@@ -2419,6 +2421,7 @@ class TerminalController {
             "notification.open",
             "notification.jump_to_unread",
             "sidebar.set_status",
+            "sidebar.clear_status",
             "app.focus_override.set",
             "app.simulate_active",
             "file.open",
@@ -9862,6 +9865,26 @@ class TerminalController {
                 key: key, value: value, icon: iconOpt, color: colorOpt,
                 url: nil, priority: priority, format: .plain, timestamp: Date()
             )
+        }
+        return result
+    }
+
+    private func v2SidebarClearStatus(params: [String: Any]) -> V2CallResult {
+        guard let tabManager = v2ResolveTabManager(params: params) else {
+            return .err(code: "unavailable", message: "TabManager not available", data: nil)
+        }
+        guard let key = v2RawString(params, "key")?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !key.isEmpty else {
+            return .err(code: "invalid_params", message: "Missing required param: key", data: nil)
+        }
+        var result: V2CallResult = .ok(["key": key, "cleared": false])
+        v2MainSync {
+            guard let ws = v2ResolveWorkspace(params: params, tabManager: tabManager) else {
+                result = .err(code: "not_found", message: "Workspace not found", data: nil)
+                return
+            }
+            let cleared = ws.statusEntries.removeValue(forKey: key) != nil
+            result = .ok(["key": key, "cleared": cleared])
         }
         return result
     }
