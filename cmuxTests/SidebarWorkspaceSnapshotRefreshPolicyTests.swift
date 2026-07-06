@@ -146,6 +146,80 @@ final class SidebarWorkspaceSnapshotRefreshPolicyTests: XCTestCase {
     }
 }
 
+final class SessionCardSnapshotTests: XCTestCase {
+    func testModeParsingFallsBackToDefault() {
+        XCTAssertEqual(SessionCardSnapshot.Mode(metadataValue: "Plan"), .plan)
+        XCTAssertEqual(SessionCardSnapshot.Mode(metadataValue: "permission_edit"), .edit)
+        XCTAssertEqual(SessionCardSnapshot.Mode(metadataValue: "anything else"), .defaultMode)
+        XCTAssertEqual(SessionCardSnapshot.Mode(metadataValue: nil), .defaultMode)
+    }
+
+    func testStatusParsingRecognizesAgentLifecycleWords() {
+        XCTAssertEqual(SessionCardSnapshot.Status(metadataValue: "working"), .running)
+        XCTAssertEqual(SessionCardSnapshot.Status(metadataValue: "needs_input"), .waiting)
+        XCTAssertEqual(SessionCardSnapshot.Status(metadataValue: "ready"), .connected)
+        XCTAssertEqual(SessionCardSnapshot.Status(metadataValue: "offline"), .idle)
+        XCTAssertNil(SessionCardSnapshot.Status(metadataValue: "unknown-status"))
+    }
+
+    func testDiffParsingNormalizesSignedCounts() {
+        XCTAssertEqual(SessionCardSnapshot.Diff.parseCount("+318"), 318)
+        XCTAssertEqual(SessionCardSnapshot.Diff.parseCount("-92"), 92)
+        XCTAssertEqual(SessionCardSnapshot.Diff.parseCount(""), 0)
+        XCTAssertEqual(SessionCardSnapshot.Diff(added: -1, deleted: -2), SessionCardSnapshot.Diff(added: 1, deleted: 2))
+    }
+
+    func testWorkspaceNumberClampsToSupportedBadgeRange() {
+        XCTAssertEqual(Self.snapshot(workspaceNumber: 0).workspaceNumber, 1)
+        XCTAssertEqual(Self.snapshot(workspaceNumber: 7).workspaceNumber, 7)
+        XCTAssertEqual(Self.snapshot(workspaceNumber: 42).workspaceNumber, 10)
+    }
+
+    func testDefaultBadgeUsesClampedWorkspaceNumber() {
+        XCTAssertEqual(Self.snapshot(workspaceNumber: 42).badge, .indexedWorktree(10))
+    }
+
+    func testExplicitUnindexedBadgeIsPreserved() {
+        let snapshot = SessionCardSnapshot(
+            workspaceNumber: 7,
+            name: "Card",
+            colorHex: "#4493F8",
+            host: .devbox,
+            branchName: "main",
+            modelName: "gpt-5",
+            mode: .plan,
+            status: .running,
+            diff: SessionCardSnapshot.Diff(added: 1, deleted: 2),
+            badge: .unindexedHost(.devbox)
+        )
+
+        XCTAssertEqual(snapshot.badge, .unindexedHost(.devbox))
+    }
+
+    func testIndexedWorktreeParsingRecognizesWorkspaceLaunchers() {
+        XCTAssertEqual(SessionCardSnapshot.indexedWorktreeNumber(in: "/co/backend-wk3"), 3)
+        XCTAssertEqual(SessionCardSnapshot.indexedWorktreeNumber(in: "~/ws-wk3.sh"), 3)
+        XCTAssertEqual(SessionCardSnapshot.indexedWorktreeNumber(in: "[wk10] local"), 10)
+        XCTAssertEqual(SessionCardSnapshot.indexedWorktreeNumber(in: "/tmp/wk7"), 7)
+        XCTAssertEqual(SessionCardSnapshot.indexedWorktreeNumber(in: "7️⃣ Cmux Test Six"), 7)
+        XCTAssertNil(SessionCardSnapshot.indexedWorktreeNumber(in: "/tmp/wk7-extra"))
+    }
+
+    private static func snapshot(workspaceNumber: Int) -> SessionCardSnapshot {
+        SessionCardSnapshot(
+            workspaceNumber: workspaceNumber,
+            name: "Card",
+            colorHex: "#4493F8",
+            host: .laptop,
+            branchName: "main",
+            modelName: "gpt-5",
+            mode: .plan,
+            status: .running,
+            diff: SessionCardSnapshot.Diff(added: 1, deleted: 2)
+        )
+    }
+}
+
 final class SidebarSelectedWorkspaceScrollPolicyTests: XCTestCase {
     func testSkipsScrollWhenSelectedWorkspaceIdIsNil() {
         XCTAssertFalse(

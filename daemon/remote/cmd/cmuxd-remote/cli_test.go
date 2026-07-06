@@ -646,6 +646,96 @@ func TestCLIV2FlagMapping(t *testing.T) {
 	}
 }
 
+func TestCLISetStatusUsesSidebarSetStatus(t *testing.T) {
+	t.Setenv("CMUX_WORKSPACE_ID", "")
+	t.Setenv("CMUX_SURFACE_ID", "")
+	sockPath, requests := startMockV2SocketWithRequestCapture(t)
+	code := runCLI([]string{
+		"--socket", sockPath, "--json",
+		"set-status",
+		"agent",
+		"Working",
+		"--icon", "bolt.fill",
+		"--color", "#4C8DFF",
+		"--priority", "70",
+		"--workspace", "workspace:1",
+	})
+	if code != 0 {
+		t.Fatalf("set-status should return 0, got %d", code)
+	}
+
+	select {
+	case req := <-requests:
+		if got := req["method"]; got != "sidebar.set_status" {
+			t.Fatalf("expected sidebar.set_status, got %v", got)
+		}
+		params, _ := req["params"].(map[string]any)
+		if got := params["key"]; got != "agent" {
+			t.Fatalf("expected key agent, got %v", got)
+		}
+		if got := params["value"]; got != "Working" {
+			t.Fatalf("expected value Working, got %v", got)
+		}
+		if got := params["icon"]; got != "bolt.fill" {
+			t.Fatalf("expected icon bolt.fill, got %v", got)
+		}
+		if got := params["color"]; got != "#4C8DFF" {
+			t.Fatalf("expected color #4C8DFF, got %v", got)
+		}
+		if got := params["priority"]; got != "70" {
+			t.Fatalf("expected priority 70, got %v", got)
+		}
+		if got := params["workspace_id"]; got != "workspace:1" {
+			t.Fatalf("expected workspace_id workspace:1, got %v", got)
+		}
+		if _, ok := params["initial_command"]; ok {
+			t.Fatalf("expected no initial_command in set-status params, got %v", params)
+		}
+		if _, ok := params["surface_id"]; ok {
+			t.Fatalf("expected no surface_id in set-status params, got %v", params)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for set-status request")
+	}
+}
+
+func TestCLIClearStatusUsesSidebarClearStatus(t *testing.T) {
+	t.Setenv("CMUX_WORKSPACE_ID", "")
+	t.Setenv("CMUX_SURFACE_ID", "")
+	sockPath, requests := startMockV2SocketWithRequestCapture(t)
+	code := runCLI([]string{
+		"--socket", sockPath, "--json",
+		"clear-status",
+		"agent",
+		"--workspace", "workspace:1",
+	})
+	if code != 0 {
+		t.Fatalf("clear-status should return 0, got %d", code)
+	}
+
+	select {
+	case req := <-requests:
+		if got := req["method"]; got != "sidebar.clear_status" {
+			t.Fatalf("expected sidebar.clear_status, got %v", got)
+		}
+		params, _ := req["params"].(map[string]any)
+		if got := params["key"]; got != "agent" {
+			t.Fatalf("expected key agent, got %v", got)
+		}
+		if got := params["workspace_id"]; got != "workspace:1" {
+			t.Fatalf("expected workspace_id workspace:1, got %v", got)
+		}
+		if _, ok := params["initial_command"]; ok {
+			t.Fatalf("expected no initial_command in clear-status params, got %v", params)
+		}
+		if _, ok := params["surface_id"]; ok {
+			t.Fatalf("expected no surface_id in clear-status params, got %v", params)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for clear-status request")
+	}
+}
+
 func TestBusyboxArgv0Detection(t *testing.T) {
 	// Verify that when argv[0] base is "cmux", we enter CLI mode
 	base := filepath.Base("cmux")

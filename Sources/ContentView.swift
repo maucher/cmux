@@ -10541,6 +10541,80 @@ struct SidebarWorkspaceTopDropIndicator: View {
     }
 }
 
+private enum SidebarWsSlotStateReader {
+    struct DiffStats: Equatable {
+        let added: Int
+        let deleted: Int
+    }
+
+    private struct SlotState: Decodable {
+        struct Diff: Decodable {
+            let added: Int?
+            let deleted: Int?
+        }
+
+        let branch: String?
+        let diff: Diff?
+        let diffAdded: Int?
+        let diffDeleted: Int?
+    }
+
+    static func branchName(forWorktreeIndex worktreeIndex: Int) -> String? {
+        for stateFile in stateFileCandidates(forWorktreeIndex: worktreeIndex) {
+            guard let branch = branchName(in: stateFile) else { continue }
+            return branch
+        }
+        return nil
+    }
+
+    static func diffStats(forWorktreeIndex worktreeIndex: Int) -> DiffStats? {
+        for stateFile in stateFileCandidates(forWorktreeIndex: worktreeIndex) {
+            guard let stats = diffStats(in: stateFile) else { continue }
+            return stats
+        }
+        return nil
+    }
+
+    private static func stateFileCandidates(forWorktreeIndex worktreeIndex: Int) -> [URL] {
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        return [
+            home
+                .appendingPathComponent(".ws/cache/devbox-state/worktrees", isDirectory: true)
+                .appendingPathComponent("wk\(worktreeIndex).json", isDirectory: false),
+            home
+                .appendingPathComponent(".ws/state/worktrees", isDirectory: true)
+                .appendingPathComponent("wk\(worktreeIndex).json", isDirectory: false),
+            home
+                .appendingPathComponent(".claude/workon/worktrees", isDirectory: true)
+                .appendingPathComponent("wk\(worktreeIndex).json", isDirectory: false),
+        ]
+    }
+
+    private static func branchName(in stateFile: URL) -> String? {
+        guard let data = try? Data(contentsOf: stateFile),
+              let state = try? JSONDecoder().decode(SlotState.self, from: data),
+              let branch = state.branch?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !branch.isEmpty
+        else {
+            return nil
+        }
+        return branch
+    }
+
+    private static func diffStats(in stateFile: URL) -> DiffStats? {
+        guard let data = try? Data(contentsOf: stateFile),
+              let state = try? JSONDecoder().decode(SlotState.self, from: data)
+        else {
+            return nil
+        }
+
+        let added = state.diff?.added ?? state.diffAdded
+        let deleted = state.diff?.deleted ?? state.diffDeleted
+        guard let added, let deleted else { return nil }
+        return DiffStats(added: added, deleted: deleted)
+    }
+}
+
 /// Freezes `showsModifierShortcutHints` for the row whose context menu is open,
 /// so pressing/releasing the modifier key while the menu is up does not flip
 /// the underlying row's shortcut badges (which would be visible around the
@@ -10760,7 +10834,7 @@ struct VerticalTabsSidebar: View {
     @AppStorage(MinimalModeTitlebarDebugSettings.leftControlsTopInsetKey)
     private var titlebarLeftControlsTopInset = MinimalModeTitlebarDebugSettings.defaultLeftControlsTopInset
 
-    let tabRowSpacing: CGFloat = 2
+    let tabRowSpacing: CGFloat = 7
     private static let extensionSidebarObservationCoalesceInterval: RunLoop.SchedulerTimeType.Stride = .milliseconds(40)
     private static let extensionSidebarDisclosureAnimation = Animation.easeInOut(duration: 0.18)
     private var sidebarTitlebarInteractionHeight: CGFloat {
@@ -11009,6 +11083,7 @@ struct VerticalTabsSidebar: View {
         .overlay(alignment: .trailing) {
             SidebarTrailingBorder()
         }
+        .background(Color(hex: "#0E0E11") ?? Color(nsColor: NSColor(srgbRed: 0.055, green: 0.055, blue: 0.067, alpha: 1)))
         .background(
             WindowAccessor { window in
                 modifierKeyMonitor.setHostWindow(window)
@@ -13615,6 +13690,7 @@ private struct PromptTextEditor: NSViewRepresentable {
     func makeNSView(context: Context) -> NSScrollView {
         let scrollView = NSTextView.scrollableTextView()
         scrollView.drawsBackground = false
+        scrollView.backgroundColor = .clear
         scrollView.hasVerticalScroller = true
         scrollView.autohidesScrollers = true
         guard let tv = scrollView.documentView as? NSTextView else { return scrollView }
@@ -13622,9 +13698,12 @@ private struct PromptTextEditor: NSViewRepresentable {
         tv.font = .systemFont(ofSize: 12)
         tv.isRichText = false
         tv.drawsBackground = false
+        tv.backgroundColor = .clear
+        tv.textColor = NSColor(hex: "#EAEAEF") ?? .labelColor
+        tv.insertionPointColor = NSColor(hex: "#4493F8") ?? .controlAccentColor
         tv.isAutomaticQuoteSubstitutionEnabled = false
         tv.isAutomaticDashSubstitutionEnabled = false
-        tv.textContainerInset = NSSize(width: 4, height: 4)
+        tv.textContainerInset = NSSize(width: 6, height: 7)
         tv.textContainer?.lineFragmentPadding = 4
         tv.textContainer?.widthTracksTextView = true
         return scrollView
@@ -13638,8 +13717,14 @@ private struct PromptTextEditor: NSViewRepresentable {
         guard let tv = scrollView.documentView as? NSTextView else { return }
         if tv.string != text { tv.string = text }
         if tv.isEditable != isEditable { tv.isEditable = isEditable }
-        let targetColor: NSColor = isEditable ? .labelColor : .placeholderTextColor
+        let targetColor: NSColor = isEditable
+            ? (NSColor(hex: "#EAEAEF") ?? .labelColor)
+            : (NSColor(hex: "#6E7681") ?? .placeholderTextColor)
         if tv.textColor != targetColor { tv.textColor = targetColor }
+        let insertionColor = NSColor(hex: "#4493F8") ?? .controlAccentColor
+        if tv.insertionPointColor != insertionColor {
+            tv.insertionPointColor = insertionColor
+        }
         context.coordinator.parent = self
         let isEmpty = tv.string.isEmpty
         if isEmpty != context.coordinator.showingPlaceholder {
@@ -13681,22 +13766,18 @@ private struct PromptTextEditorContainer: View {
         ZStack(alignment: .topLeading) {
             if text.isEmpty {
                 Text(placeholder)
-                    .font(.system(size: 12))
-                    .foregroundColor(Color(NSColor.placeholderTextColor))
-                    .padding(.leading, 9)
-                    .padding(.top, 7)
+                    .font(.custom("Inter", size: 12))
+                    .foregroundColor(promptLauncherColor("#6E7681"))
+                    .padding(.leading, 11)
+                    .padding(.top, 10)
                     .allowsHitTesting(false)
             }
             PromptTextEditor(text: $text, placeholder: placeholder,
                              isEditable: isEditable, onSubmit: onSubmit)
         }
         .background(
-            RoundedRectangle(cornerRadius: 5)
-                .fill(Color(NSColor.controlBackgroundColor))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 5)
-                .stroke(Color(NSColor.separatorColor), lineWidth: 0.5)
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.clear)
         )
     }
 }
@@ -14129,25 +14210,171 @@ private struct PromptLauncherArrowCursorArea: NSViewRepresentable {
     }
 }
 
-private struct SpinningCircleButton: View {
+private func promptLauncherColor(_ hex: String) -> Color {
+    Color(hex: hex) ?? Color(nsColor: NSColor(hex: hex) ?? .white)
+}
+
+private struct PromptLauncherSpinningDots: View {
+    var size: CGFloat = 18
+    var color: Color = promptLauncherColor("#78BBFF")
     @State private var rotation: Double = 0
 
     var body: some View {
         ZStack {
-            Circle()
-                .stroke(Color.accentColor.opacity(0.25), lineWidth: 2)
-                .frame(width: 24, height: 24)
-            Circle()
-                .trim(from: 0, to: 0.65)
-                .stroke(Color.accentColor, style: StrokeStyle(lineWidth: 2, lineCap: .round))
-                .frame(width: 24, height: 24)
-                .rotationEffect(.degrees(rotation))
+            ForEach(0..<6, id: \.self) { index in
+                Circle()
+                    .fill(color.opacity(opacity(for: index)))
+                    .frame(width: dotSize(for: index), height: dotSize(for: index))
+                    .offset(
+                        x: offsetX(for: index),
+                        y: offsetY(for: index)
+                    )
+            }
         }
+        .frame(width: size, height: size)
+        .rotationEffect(.degrees(rotation))
         .onAppear {
-            withAnimation(.linear(duration: 0.9).repeatForever(autoreverses: false)) {
+            rotation = 0
+            withAnimation(.linear(duration: 0.85).repeatForever(autoreverses: false)) {
                 rotation = 360
             }
         }
+    }
+
+    private var radius: CGFloat {
+        size * 0.34
+    }
+
+    private func angle(for index: Int) -> CGFloat {
+        CGFloat(index) * 2 * .pi / 6 - .pi / 2
+    }
+
+    private func offsetX(for index: Int) -> CGFloat {
+        radius * CGFloat(cos(Double(angle(for: index))))
+    }
+
+    private func offsetY(for index: Int) -> CGFloat {
+        radius * CGFloat(sin(Double(angle(for: index))))
+    }
+
+    private func dotSize(for index: Int) -> CGFloat {
+        index == 0 ? size * 0.22 : size * 0.18
+    }
+
+    private func opacity(for index: Int) -> Double {
+        max(0.24, 1 - Double(index) * 0.13)
+    }
+}
+
+private struct PromptLauncherChoiceMenu: View {
+    let choices: [CmuxPromptLauncherChoice]
+    @Binding var selection: String
+    let iconName: String
+    let maxWidth: CGFloat
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .fill(promptLauncherColor("#1D1D23"))
+            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                .strokeBorder(promptLauncherColor("#303039"), lineWidth: 1)
+
+            Menu {
+                ForEach(choices) { choice in
+                    Button {
+                        selection = choice.id
+                    } label: {
+                        HStack {
+                            if choice.id == selection {
+                                Image(systemName: "checkmark")
+                            }
+                            Text(choice.title)
+                        }
+                    }
+                }
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: iconName)
+                        .font(.system(size: 11, weight: .medium))
+                        .symbolRenderingMode(.monochrome)
+                        .frame(width: 13, height: 13)
+
+                    Text(selectedTitle)
+                        .font(.custom("JetBrains Mono", size: 10.5))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 8, weight: .semibold))
+                        .symbolRenderingMode(.monochrome)
+                        .opacity(0.72)
+                }
+                .foregroundColor(promptLauncherColor("#C9C9D1"))
+                .padding(.horizontal, 9)
+                .frame(width: maxWidth, height: 30)
+            }
+            .menuStyle(.borderlessButton)
+            .buttonStyle(.plain)
+        }
+        .frame(width: maxWidth, height: 30)
+        .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+        .disabled(choices.isEmpty)
+    }
+
+    private var selectedTitle: String {
+        if let selectedChoice = choices.first(where: { $0.id == selection }) {
+            return selectedChoice.title
+        }
+        if let firstChoice = choices.first {
+            return firstChoice.title
+        }
+        return selection
+    }
+}
+
+private struct PromptLauncherSubmitButton: View {
+    let isLoading: Bool
+    let canSend: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            ZStack {
+                Circle()
+                    .fill(backgroundColor)
+                    .frame(width: 31, height: 31)
+
+                if isLoading {
+                    PromptLauncherSpinningDots(size: 17, color: promptLauncherColor("#78BBFF"))
+                } else {
+                    Image(systemName: "arrow.up")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundColor(.white)
+                }
+            }
+            .overlay(
+                Circle()
+                    .strokeBorder(borderColor, lineWidth: 1)
+            )
+            .opacity(canSend || isLoading ? 1 : 0.48)
+        }
+        .buttonStyle(.plain)
+        .disabled(!canSend || isLoading)
+        .keyboardShortcut(.return, modifiers: [.command])
+        .accessibilityLabel(String(localized: "sidebar.prompt_launcher.send",
+                                   defaultValue: "Send"))
+    }
+
+    private var backgroundColor: Color {
+        if isLoading {
+            return promptLauncherColor("#1C1C22")
+        }
+        return canSend ? promptLauncherColor("#1F6FEB") : promptLauncherColor("#25252B")
+    }
+
+    private var borderColor: Color {
+        isLoading ? promptLauncherColor("#2A2A31") : Color.white.opacity(0.08)
     }
 }
 
@@ -14159,7 +14386,10 @@ private struct SidebarPromptLauncher: View {
     var body: some View {
         Group {
             if let config = cmuxConfigStore.promptLauncher {
-                VStack(alignment: .leading, spacing: 4) {
+                let canSend = !model.promptText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    && !model.isLoading
+
+                VStack(alignment: .leading, spacing: 8) {
                     PromptTextEditorContainer(
                         text: $model.promptText,
                         placeholder: String(localized: "sidebar.prompt_launcher.placeholder",
@@ -14174,65 +14404,75 @@ private struct SidebarPromptLauncher: View {
                             )
                         }
                     )
-                    .frame(height: 120)
+                    .frame(height: 44)
 
-                    HStack(spacing: 6) {
-                        Picker(selection: $model.selectedTarget, label: EmptyView()) {
-                            ForEach(config.targets, id: \.id) { target in
-                                Text(target.title).font(.system(size: 10)).tag(target.id)
-                            }
-                        }
-                        .controlSize(.small)
-                        .frame(maxWidth: 110)
+                    HStack(spacing: 7) {
+                        PromptLauncherChoiceMenu(
+                            choices: config.targets,
+                            selection: $model.selectedTarget,
+                            iconName: promptLauncherTargetIconName,
+                            maxWidth: 78
+                        )
 
-                        Picker(selection: $model.selectedProvider, label: EmptyView()) {
-                            ForEach(config.providers, id: \.id) { provider in
-                                Text(provider.title).font(.system(size: 10)).tag(provider.id)
-                            }
-                        }
-                        .controlSize(.small)
-                        .frame(maxWidth: 100)
+                        PromptLauncherChoiceMenu(
+                            choices: config.providers,
+                            selection: $model.selectedProvider,
+                            iconName: "chevron.left.forwardslash.chevron.right",
+                            maxWidth: 86
+                        )
 
-                        Spacer()
+                        Spacer(minLength: 0)
 
-                        if model.isLoading {
-                            SpinningCircleButton()
-                        } else {
-                            Button {
+                        PromptLauncherSubmitButton(
+                            isLoading: model.isLoading,
+                            canSend: canSend
+                        ) {
+                            if canSend {
                                 model.launch(
                                     config: config,
                                     tabManager: tabManager,
                                     configSourcePath: cmuxConfigStore.promptLauncherSourcePath,
                                     globalConfigPath: cmuxConfigStore.globalConfigPath
                                 )
-                            } label: {
-                                ZStack {
-                                    Circle()
-                                        .fill(Color.accentColor)
-                                        .frame(width: 24, height: 24)
-                                    Image(systemName: "arrow.up")
-                                        .font(.system(size: 11, weight: .bold))
-                                        .foregroundColor(.white)
-                                }
                             }
-                            .buttonStyle(.plain)
-                            .keyboardShortcut(.return, modifiers: [.command])
-                            .accessibilityLabel(String(localized: "sidebar.prompt_launcher.send",
-                                                       defaultValue: "Send"))
                         }
                     }
                     .overlay(PromptLauncherArrowCursorArea())
                 }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 8)
+                .padding(9)
+                .background(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(promptLauncherColor("#17171B"))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .strokeBorder(promptLauncherColor("#25252B"), lineWidth: 1)
+                )
+                .padding(.horizontal, 9)
+                .padding(.top, 9)
+                .padding(.bottom, 8)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .overlay(alignment: .top) { Divider() }
+                .background(promptLauncherColor("#0E0E11"))
+                .overlay(alignment: .top) {
+                    Rectangle()
+                        .fill(promptLauncherColor("#1E1E24"))
+                        .frame(height: 1)
+                }
                 .onAppear { model.configure(config) }
                 .onChange(of: config) { _, newConfig in
                     model.configure(newConfig)
                 }
             }
         }
+    }
+
+    private var promptLauncherTargetIconName: String {
+        let selectedChoice = cmuxConfigStore.promptLauncher?.targets.first { $0.id == model.selectedTarget }
+        let title = selectedChoice?.title.lowercased() ?? model.selectedTarget.lowercased()
+        if title.contains("devbox") || title.contains("ssh") || title.contains("server") {
+            return "server.rack"
+        }
+        return "laptopcomputer"
     }
 }
 
@@ -16118,359 +16358,367 @@ struct TabItemView: View, Equatable {
         )
     }
 
+    private func sessionCardSnapshot(from workspaceSnapshot: SidebarWorkspaceSnapshotBuilder.Snapshot) -> SessionCardSnapshot {
+        SessionCardSnapshot(
+            workspaceNumber: index + 1,
+            name: sessionCardDisplayName(from: workspaceSnapshot),
+            colorHex: sessionCardColorHex(from: workspaceSnapshot),
+            host: sessionCardHost(from: workspaceSnapshot),
+            branchName: sessionCardBranchName(from: workspaceSnapshot),
+            modelName: sessionCardModelName(from: workspaceSnapshot),
+            mode: sessionCardMode(from: workspaceSnapshot),
+            status: sessionCardStatus(from: workspaceSnapshot),
+            diff: sessionCardDiff(from: workspaceSnapshot),
+            badge: sessionCardBadge(from: workspaceSnapshot)
+        )
+    }
+
+    private func sessionCardDisplayName(from workspaceSnapshot: SidebarWorkspaceSnapshotBuilder.Snapshot) -> String {
+        let worktreeIndex = sessionCardIndexedWorktreeNumber(from: workspaceSnapshot)
+        var title = workspaceSnapshot.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        for _ in 0..<4 {
+            let before = title
+            title = sessionCardTitleRemovingLeadingIcon(title)
+            title = sessionCardTitleRemovingLeadingHostLabel(title)
+            if let worktreeIndex {
+                title = sessionCardTitleRemovingLeadingWorktreeIndex(title, worktreeIndex: worktreeIndex)
+            }
+            title = title.trimmingCharacters(in: .whitespacesAndNewlines)
+            if title == before { break }
+        }
+        return nonEmptySessionCardText(title) ?? workspaceSnapshot.title
+    }
+
+    private func sessionCardTitleRemovingLeadingIcon(_ title: String) -> String {
+        let iconPrefixes = [
+            "🖥️", "🖥", "💻", "🖥︎", "📟", "🧑‍💻",
+        ]
+        for prefix in iconPrefixes where title.hasPrefix(prefix) {
+            return String(title.dropFirst(prefix.count)).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return title
+    }
+
+    private func sessionCardTitleRemovingLeadingHostLabel(_ title: String) -> String {
+        let lowercased = title.lowercased()
+        let hostPrefixes = [
+            "[devbox]",
+            "[local]",
+            "[laptop]",
+        ]
+        for prefix in hostPrefixes where lowercased.hasPrefix(prefix) {
+            return String(title.dropFirst(prefix.count)).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return title
+    }
+
+    private func sessionCardTitleRemovingLeadingWorktreeIndex(_ title: String, worktreeIndex: Int) -> String {
+        let keycapPrefixes = [
+            "\(worktreeIndex)\u{FE0F}\u{20E3}",
+            "\(worktreeIndex)\u{20E3}",
+        ]
+        for prefix in keycapPrefixes where title.hasPrefix(prefix) {
+            return String(title.dropFirst(prefix.count)).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        let indexPrefix = "\(worktreeIndex)"
+        guard title.hasPrefix(indexPrefix) else { return title }
+        let remainder = title.dropFirst(indexPrefix.count)
+        guard remainder.first?.isWhitespace == true else { return title }
+        return String(remainder).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func sessionCardColorHex(from workspaceSnapshot: SidebarWorkspaceSnapshotBuilder.Snapshot) -> String {
+        if let customColorHex = workspaceSnapshot.customColorHex,
+           NSColor(hex: customColorHex) != nil {
+            return customColorHex
+        }
+        return cmuxAccentNSColor(for: colorScheme).hexString()
+    }
+
+    private func sessionCardHost(from workspaceSnapshot: SidebarWorkspaceSnapshotBuilder.Snapshot) -> SessionCardSnapshot.Host {
+        if tab.isRemoteWorkspace ||
+            tab.hasActiveRemoteTerminalSessions ||
+            workspaceSnapshot.remoteWorkspaceSidebarText != nil {
+            return .devbox
+        }
+        return .laptop
+    }
+
+    private func sessionCardBadge(from workspaceSnapshot: SidebarWorkspaceSnapshotBuilder.Snapshot) -> SessionCardSnapshot.Badge {
+        if let worktreeIndex = sessionCardIndexedWorktreeNumber(from: workspaceSnapshot) {
+            return .indexedWorktree(worktreeIndex)
+        }
+        return .unindexedHost(sessionCardHost(from: workspaceSnapshot))
+    }
+
+    private func sessionCardIndexedWorktreeNumber(from workspaceSnapshot: SidebarWorkspaceSnapshotBuilder.Snapshot) -> Int? {
+        var candidates: [String] = [
+            workspaceSnapshot.title,
+            tab.currentDirectory,
+        ]
+        candidates.append(contentsOf: tab.panelDirectories.values)
+        candidates.append(contentsOf: workspaceSnapshot.compactDirectoryCandidates)
+        candidates.append(contentsOf: workspaceSnapshot.compactBranchDirectoryCandidates)
+        for line in workspaceSnapshot.branchDirectoryLines {
+            candidates.append(contentsOf: line.directoryCandidates)
+        }
+        for paneId in tab.bonsplitController.allPaneIds {
+            for surface in tab.bonsplitController.tabs(inPane: paneId) {
+                candidates.append(surface.title)
+            }
+        }
+        for agent in orderedSessionCardAgentSnapshots() {
+            candidates.append(contentsOf: [
+                agent.workingDirectory,
+                agent.launchCommand?.workingDirectory,
+                agent.launchCommand?.executablePath,
+                agent.launchCommand?.environment?["SAMSARA_WORKTREE"],
+            ].compactMap { $0 })
+            candidates.append(contentsOf: agent.launchCommand?.arguments ?? [])
+        }
+        for candidate in candidates {
+            if let index = SessionCardSnapshot.indexedWorktreeNumber(in: candidate) {
+                return index
+            }
+        }
+        return nil
+    }
+
+    private func sessionCardBranchName(from workspaceSnapshot: SidebarWorkspaceSnapshotBuilder.Snapshot) -> String? {
+        if let worktreeIndex = sessionCardIndexedWorktreeNumber(from: workspaceSnapshot),
+           let wsBranch = SidebarWsSlotStateReader.branchName(forWorktreeIndex: worktreeIndex) {
+            return wsBranch
+        }
+        if let branch = nonEmptySessionCardText(workspaceSnapshot.compactGitBranchSummaryText) {
+            return branch
+        }
+        for line in workspaceSnapshot.branchDirectoryLines {
+            if let branch = nonEmptySessionCardText(line.branch) {
+                return branch
+            }
+        }
+        let panelBranchLines = tab.sidebarGitBranchesInDisplayOrder().map { branch in
+            "\(branch.branch)\(branch.isDirty ? "*" : "")"
+        }
+        if !panelBranchLines.isEmpty {
+            return panelBranchLines.joined(separator: " | ")
+        }
+        return nonEmptySessionCardText(tab.gitBranch?.branch)
+    }
+
+    private func sessionCardMode(from workspaceSnapshot: SidebarWorkspaceSnapshotBuilder.Snapshot) -> SessionCardSnapshot.Mode {
+        if let modeValue = sessionCardMetadataValue(
+            for: [
+                "session.mode",
+                "agent.mode",
+                "permissionMode",
+                "permission_mode",
+            ],
+            workspaceSnapshot: workspaceSnapshot
+        ) {
+            return SessionCardSnapshot.Mode(metadataValue: modeValue)
+        }
+        for agent in orderedSessionCardAgentSnapshots() {
+            if let modeValue = sessionCardArgumentValue(
+                in: agent.launchCommand?.arguments ?? [],
+                names: ["--mode", "--permission-mode", "--permissionMode"]
+            ) {
+                return SessionCardSnapshot.Mode(metadataValue: modeValue)
+            }
+        }
+        return .defaultMode
+    }
+
+    private func sessionCardModelName(from workspaceSnapshot: SidebarWorkspaceSnapshotBuilder.Snapshot) -> String? {
+        if let modelValue = sessionCardMetadataValue(
+            for: [
+                "session.model",
+                "agent.model",
+                "model",
+            ],
+            workspaceSnapshot: workspaceSnapshot
+        ) {
+            return modelValue
+        }
+        for agent in orderedSessionCardAgentSnapshots() {
+            if let modelName = sessionCardModelName(from: agent) {
+                return modelName
+            }
+        }
+        return nil
+    }
+
+    private func sessionCardModelName(from agent: SessionRestorableAgentSnapshot) -> String? {
+        if let modelName = sessionCardArgumentValue(
+            in: agent.launchCommand?.arguments ?? [],
+            names: ["--model", "-m"]
+        ) {
+            return modelName
+        }
+        let environment = agent.launchCommand?.environment ?? [:]
+        for key in ["CMUX_AGENT_MODEL", "CODEX_MODEL", "OPENAI_MODEL", "ANTHROPIC_MODEL", "CLAUDE_MODEL"] {
+            if let modelName = nonEmptySessionCardText(environment[key]) {
+                return modelName
+            }
+        }
+        return nil
+    }
+
+    private func sessionCardStatus(from workspaceSnapshot: SidebarWorkspaceSnapshotBuilder.Snapshot) -> SessionCardSnapshot.Status {
+        let lifecycleStates = tab.agentLifecycleStatesByPanelId.values.flatMap { $0.values }
+        if lifecycleStates.contains(.running) {
+            return .running
+        }
+        if lifecycleStates.contains(.needsInput) {
+            return .waiting
+        }
+        if let metadataStatus = SessionCardSnapshot.Status(metadataValue: sessionCardMetadataValue(
+            for: [
+                "session.status",
+                "agent.status",
+                "status",
+            ],
+            workspaceSnapshot: workspaceSnapshot
+        )) {
+            return metadataStatus
+        }
+        switch tab.remoteConnectionState {
+        case .connecting, .reconnecting:
+            return .running
+        case .connected:
+            return .connected
+        case .disconnected, .error:
+            break
+        }
+        if lifecycleStates.contains(.idle) ||
+            !tab.agentPIDPanelIdsByKey.isEmpty ||
+            !tab.restoredAgentSnapshotsByPanelId.isEmpty ||
+            tab.hasActiveRemoteTerminalSessions {
+            return .connected
+        }
+        return .idle
+    }
+
+    private func sessionCardDiff(from workspaceSnapshot: SidebarWorkspaceSnapshotBuilder.Snapshot) -> SessionCardSnapshot.Diff {
+        let added = sessionCardMetadataValue(
+            for: [
+                "session.diff.added",
+                "session.diff.additions",
+                "diff.added",
+                "diff.additions",
+            ],
+            workspaceSnapshot: workspaceSnapshot
+        )
+        let deleted = sessionCardMetadataValue(
+            for: [
+                "session.diff.deleted",
+                "session.diff.deletions",
+                "diff.deleted",
+                "diff.deletions",
+            ],
+            workspaceSnapshot: workspaceSnapshot
+        )
+        if added == nil,
+           deleted == nil,
+           let worktreeIndex = sessionCardIndexedWorktreeNumber(from: workspaceSnapshot),
+           let wsDiff = SidebarWsSlotStateReader.diffStats(forWorktreeIndex: worktreeIndex) {
+            return SessionCardSnapshot.Diff(added: wsDiff.added, deleted: wsDiff.deleted)
+        }
+        return SessionCardSnapshot.Diff(
+            added: SessionCardSnapshot.Diff.parseCount(added),
+            deleted: SessionCardSnapshot.Diff.parseCount(deleted)
+        )
+    }
+
+    private func sessionCardMetadataValue(
+        for keys: [String],
+        workspaceSnapshot: SidebarWorkspaceSnapshotBuilder.Snapshot
+    ) -> String? {
+        for key in keys {
+            if let value = nonEmptySessionCardText(tab.statusEntries[key]?.value) {
+                return value
+            }
+            if let value = nonEmptySessionCardText(
+                workspaceSnapshot.metadataEntries.first(where: { $0.key == key })?.value
+            ) {
+                return value
+            }
+        }
+        return nil
+    }
+
+    private func orderedSessionCardAgentSnapshots() -> [SessionRestorableAgentSnapshot] {
+        let orderedPanelIds = tab.sidebarOrderedPanelIds()
+        var snapshots: [SessionRestorableAgentSnapshot] = []
+        var seenPanelIds = Set<UUID>()
+        for panelId in orderedPanelIds {
+            guard let snapshot = tab.restoredAgentSnapshotsByPanelId[panelId] else { continue }
+            snapshots.append(snapshot)
+            seenPanelIds.insert(panelId)
+        }
+        for (panelId, snapshot) in tab.restoredAgentSnapshotsByPanelId
+        where !seenPanelIds.contains(panelId) {
+            snapshots.append(snapshot)
+        }
+        return snapshots
+    }
+
+    private func sessionCardArgumentValue(in arguments: [String], names: [String]) -> String? {
+        for (index, argument) in arguments.enumerated() {
+            for name in names {
+                if argument == name,
+                   index + 1 < arguments.count,
+                   let value = nonEmptySessionCardText(arguments[index + 1]) {
+                    return value
+                }
+                let prefix = name + "="
+                if argument.hasPrefix(prefix) {
+                    return nonEmptySessionCardText(String(argument.dropFirst(prefix.count)))
+                }
+            }
+        }
+        return nil
+    }
+
+    private func nonEmptySessionCardText(_ value: String?) -> String? {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let trimmed, !trimmed.isEmpty else { return nil }
+        return trimmed
+    }
+
     var body: some View {
         let workspaceSnapshot = self.workspaceSnapshot
-        let closeWorkspaceTooltip = String(localized: "sidebar.closeWorkspace.tooltip", defaultValue: "Close Workspace")
-        let protectedWorkspaceTooltip = String(
-            localized: "sidebar.pinnedWorkspaceProtected.tooltip",
-            defaultValue: "Pinned workspace. Closing requires confirmation."
-        )
-        let closeButtonTooltip = workspaceSnapshot.isPinned
-            ? protectedWorkspaceTooltip
-            : KeyboardShortcutSettings.Action.closeWorkspace.tooltip(closeWorkspaceTooltip)
+        let cardSnapshot = sessionCardSnapshot(from: workspaceSnapshot)
+        let cardShortcutHintText: String? = {
+            guard showsWorkspaceShortcutHint else { return nil }
+            if case .indexedWorktree = cardSnapshot.badge {
+                return nil
+            }
+            return workspaceShortcutLabel
+        }()
         let accessibilityHintText = String(localized: "sidebar.workspace.accessibilityHint", defaultValue: "Activate to focus this workspace. Drag to reorder, or use Move Up and Move Down actions.")
         let moveUpActionText = String(localized: "sidebar.workspace.moveUpAction", defaultValue: "Move Up")
         let moveDownActionText = String(localized: "sidebar.workspace.moveDownAction", defaultValue: "Move Down")
         let finderDirectoryPath = WorkspaceFinderDirectoryResolver.path(for: tab)
         let finderDirectoryCacheKey = WorkspaceFinderDirectoryCacheKey(path: finderDirectoryPath)
-        let latestNotificationSubtitle = latestNotificationText
-        let conversationMessageSubtitle = !settings.hidesAllDetails && settings.iMessageModeEnabled
-            ? workspaceSnapshot.latestConversationMessage?
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-                .nilIfEmpty
-            : nil
-        let effectiveSubtitle = latestNotificationSubtitle ?? conversationMessageSubtitle
-        let detailVisibility = visibleAuxiliaryDetails
-        let scaledUnreadBadgeSize = 16 * fontScale
-        let scaledCloseButtonHitSize = max(16, 16 * fontScale)
-        let scaledCloseButtonWidth = max(
-            SidebarTrailingAccessoryWidthPolicy.closeButtonWidth,
-            scaledCloseButtonHitSize
+
+        SessionCard(
+            snapshot: cardSnapshot,
+            isActive: isActive || isMultiSelected,
+            isHovered: rowInteractionState.isPointerHovering,
+            fontScale: fontScale
         )
+        .padding(.horizontal, 9)
 
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: .top, spacing: 8) {
-                if unreadCount > 0 {
-                    ZStack {
-                        Circle()
-                            .fill(activeUnreadBadgeFillColor)
-                        Text("\(unreadCount)")
-                            .font(.system(size: scaledFontSize(9), weight: .semibold))
-                            .foregroundColor(activeUnreadBadgeTextColor)
-                    }
-                    .frame(width: scaledUnreadBadgeSize, height: scaledUnreadBadgeSize)
-                }
-
-                if workspaceSnapshot.isPinned {
-                    Image(systemName: "pin.fill")
-                        .font(.system(size: scaledFontSize(9), weight: .semibold))
-                        .foregroundColor(activeSecondaryColor(0.8))
-                        .safeHelp(protectedWorkspaceTooltip)
-                }
-
-                Text(workspaceSnapshot.title)
-                    .font(.system(size: scaledFontSize(12.5), weight: titleFontWeight))
-                    .foregroundColor(activePrimaryTextColor)
-                    .lineLimit(settings.wrapsWorkspaceTitles ? nil : 1)
-                    .truncationMode(.tail)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .layoutPriority(1)
-
-                // The close button is a sibling that always reserves its width
-                // when the workspace is closable, so the title wraps/truncates
-                // before this corner instead of flowing under the hover x. Its
-                // visibility toggles via opacity so hover never re-lays-out the
-                // row. (Matches the group-header plus-button pattern.)
-                if canCloseWorkspace {
-                    Button(action: {
-                        #if DEBUG
-                        cmuxDebugLog("sidebar.close workspace=\(tab.id.uuidString.prefix(5)) method=button")
-                        #endif
-                        tabManager.closeWorkspaceWithConfirmation(tab)
-                    }) {
-                        Image(systemName: "xmark")
-                            .font(.system(size: scaledFontSize(9), weight: .medium))
-                            .foregroundColor(activeSecondaryColor(0.7))
-                            .frame(width: scaledCloseButtonWidth, height: scaledCloseButtonHitSize, alignment: .center)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .safeHelp(closeButtonTooltip)
-                    .opacity(showCloseButton ? 1 : 0)
-                    .allowsHitTesting(showCloseButton)
-                    .accessibilityHidden(!showCloseButton)
-                }
-            }
-
-            if let description = workspaceSnapshot.customDescription {
-                SidebarWorkspaceDescriptionText(
-                    markdown: description,
-                    isActive: usesInvertedActiveForeground,
-                    activeForegroundColor: activeSecondaryColor(0.84),
-                    fontScale: fontScale
-                )
-                .id(description)
-            }
-
-            if let subtitle = effectiveSubtitle {
-                Text(subtitle)
-                    .font(.system(size: scaledFontSize(10)))
-                    .foregroundColor(activeSecondaryColor(0.8))
-                    .lineLimit(2)
-                    .truncationMode(.tail)
-                    .multilineTextAlignment(.leading)
-            }
-
-            remoteWorkspaceSection
-
-            if detailVisibility.showsMetadata {
-                let metadataEntries = workspaceSnapshot.metadataEntries
-                let metadataBlocks = workspaceSnapshot.metadataBlocks
-                if !metadataEntries.isEmpty {
-                    SidebarMetadataRows(
-                        entries: metadataEntries,
-                        isActive: usesInvertedActiveForeground,
-                        activeForegroundColor: activeSecondaryColor(0.95),
-                        activeSecondaryForegroundColor: activeSecondaryColor(0.65),
-                        fontScale: fontScale,
-                        onFocus: { updateSelection() }
-                    )
-                    .transition(.opacity.combined(with: .move(edge: .top)))
-                }
-                if !metadataBlocks.isEmpty {
-                    SidebarMetadataMarkdownBlocks(
-                        blocks: metadataBlocks,
-                        isActive: usesInvertedActiveForeground,
-                        activeForegroundColor: activeSecondaryColor(0.8),
-                        activeSecondaryForegroundColor: activeSecondaryColor(0.65),
-                        fontScale: fontScale,
-                        onFocus: { updateSelection() }
-                    )
-                    .transition(.opacity.combined(with: .move(edge: .top)))
-                }
-            }
-
-            if detailVisibility.showsLog, let latestLog = workspaceSnapshot.latestLog {
-                HStack(spacing: 4) {
-                    Image(systemName: logLevelIcon(latestLog.level))
-                        .font(.system(size: scaledFontSize(8)))
-                        .foregroundColor(logLevelColor(latestLog.level, isActive: usesInvertedActiveForeground))
-                    Text(latestLog.message)
-                        .font(.system(size: scaledFontSize(10)))
-                        .foregroundColor(activeSecondaryColor(0.8))
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                }
-                .transition(.opacity.combined(with: .move(edge: .top)))
-            }
-
-            if detailVisibility.showsProgress, let progress = workspaceSnapshot.progress {
-                VStack(alignment: .leading, spacing: 2) {
-                    GeometryReader { geo in
-                        ZStack(alignment: .leading) {
-                            Capsule()
-                                .fill(activeProgressTrackColor)
-                            Capsule()
-                                .fill(activeProgressFillColor)
-                                .frame(width: max(0, geo.size.width * CGFloat(progress.value)))
-                        }
-                    }
-                    .frame(height: max(3, 3 * fontScale))
-
-                    if let label = progress.label {
-                        Text(label)
-                            .font(.system(size: scaledFontSize(9)))
-                            .foregroundColor(activeSecondaryColor(0.6))
-                            .lineLimit(1)
-                    }
-                }
-                .transition(.opacity.combined(with: .move(edge: .top)))
-            }
-
-            // Branch + directory row
-            if detailVisibility.showsBranchDirectory {
-                if sidebarBranchVerticalLayout {
-                    if !workspaceSnapshot.branchDirectoryLines.isEmpty {
-                        HStack(alignment: .top, spacing: 3) {
-                            if sidebarShowGitBranchIcon, workspaceSnapshot.branchLinesContainBranch {
-                                Image(systemName: "arrow.triangle.branch")
-                                    .font(.system(size: scaledFontSize(9)))
-                                    .foregroundColor(activeSecondaryColor(0.6))
-                            }
-                            VStack(alignment: .leading, spacing: 1) {
-                                ForEach(Array(workspaceSnapshot.branchDirectoryLines.enumerated()), id: \.offset) { _, line in
-                                    if sidebarStacksBranchAndDirectory {
-                                        if let branch = line.branch {
-                                            Text(branch)
-                                                .font(.system(size: scaledFontSize(10), design: .monospaced))
-                                                .foregroundColor(activeSecondaryColor(0.75))
-                                                .lineLimit(1)
-                                                .truncationMode(.tail)
-                                        }
-                                        if !line.directoryCandidates.isEmpty {
-                                            SidebarDirectoryText(
-                                                candidates: line.directoryCandidates,
-                                                color: activeSecondaryColor(0.75),
-                                                fontScale: fontScale
-                                            )
-                                        }
-                                    } else {
-                                        HStack(spacing: 3) {
-                                            if let branch = line.branch {
-                                                Text(branch)
-                                                    .font(.system(size: scaledFontSize(10), design: .monospaced))
-                                                    .foregroundColor(activeSecondaryColor(0.75))
-                                                    .lineLimit(1)
-                                                    .truncationMode(.tail)
-                                            }
-                                            if line.branch != nil, !line.directoryCandidates.isEmpty {
-                                                Image(systemName: "circle.fill")
-                                                    .font(.system(size: scaledFontSize(3)))
-                                                    .foregroundColor(activeSecondaryColor(0.6))
-                                                    .padding(.horizontal, 1)
-                                            }
-                                            if !line.directoryCandidates.isEmpty {
-                                                SidebarDirectoryText(
-                                                    candidates: line.directoryCandidates,
-                                                    color: activeSecondaryColor(0.75),
-                                                    fontScale: fontScale
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                } else if sidebarStacksBranchAndDirectory,
-                          (workspaceSnapshot.compactGitBranchSummaryText != nil
-                           || !workspaceSnapshot.compactDirectoryCandidates.isEmpty) {
-                    HStack(alignment: .top, spacing: 3) {
-                        if sidebarShowGitBranchIcon, workspaceSnapshot.compactGitBranchSummaryText != nil {
-                            Image(systemName: "arrow.triangle.branch")
-                                .font(.system(size: scaledFontSize(9)))
-                                .foregroundColor(activeSecondaryColor(0.6))
-                        }
-                        VStack(alignment: .leading, spacing: 1) {
-                            if let branchRow = workspaceSnapshot.compactGitBranchSummaryText {
-                                Text(branchRow)
-                                    .font(.system(size: scaledFontSize(10), design: .monospaced))
-                                    .foregroundColor(activeSecondaryColor(0.75))
-                                    .lineLimit(1)
-                                    .truncationMode(.tail)
-                            }
-                            if !workspaceSnapshot.compactDirectoryCandidates.isEmpty {
-                                SidebarDirectoryText(
-                                    candidates: workspaceSnapshot.compactDirectoryCandidates,
-                                    color: activeSecondaryColor(0.75),
-                                    fontScale: fontScale
-                                )
-                            }
-                        }
-                    }
-                } else if !workspaceSnapshot.compactBranchDirectoryCandidates.isEmpty {
-                    HStack(spacing: 3) {
-                        if sidebarShowGitBranchIcon, workspaceSnapshot.compactGitBranchSummaryText != nil {
-                            Image(systemName: "arrow.triangle.branch")
-                                .font(.system(size: scaledFontSize(9)))
-                                .foregroundColor(activeSecondaryColor(0.6))
-                        }
-                        SidebarDirectoryText(
-                            candidates: workspaceSnapshot.compactBranchDirectoryCandidates,
-                            color: activeSecondaryColor(0.75),
-                            fontScale: fontScale
-                        )
-                    }
-                }
-            }
-
-            // Pull request rows
-            if detailVisibility.showsPullRequests, !workspaceSnapshot.pullRequestRows.isEmpty {
-                VStack(alignment: .leading, spacing: 1) {
-                    ForEach(workspaceSnapshot.pullRequestRows) { pullRequest in
-                        let pullRequestNumber = String(pullRequest.number)
-                        let pullRequestTitle = "\(pullRequest.label) #\(pullRequestNumber)"
-                        let rowContent = HStack(spacing: 4) {
-                            PullRequestStatusIcon(
-                                status: pullRequest.status,
-                                color: pullRequestForegroundColor,
-                                fontScale: fontScale
-                            )
-                            Text(pullRequestTitle).underline(settings.makesPullRequestsClickable).lineLimit(1).truncationMode(.tail)
-                            Text(pullRequestStatusLabel(pullRequest.status)).lineLimit(1)
-                            Spacer(minLength: 0)
-                        }
-                        .font(.system(size: scaledFontSize(10), weight: .semibold))
-                        .foregroundColor(pullRequestForegroundColor)
-                        .opacity(pullRequest.isStale ? 0.5 : 1)
-                        if settings.makesPullRequestsClickable {
-                            Button(action: { openPullRequestLink(pullRequest.url) }) { rowContent }
-                                .buttonStyle(.plain)
-                                .tint(pullRequestForegroundColor)
-                                .safeHelp(String(localized: "sidebar.pullRequest.openTooltip", defaultValue: "Open \(pullRequestTitle)"))
-                                .accessibilityIdentifier("SidebarPullRequestRow")
-                        } else {
-                            rowContent.accessibilityElement(children: .combine).accessibilityIdentifier("SidebarPullRequestRow")
-                        }
-                    }
-                }
-            }
-
-            // Ports row
-            if detailVisibility.showsPorts, !workspaceSnapshot.listeningPorts.isEmpty {
-                HStack(spacing: 4) {
-                    ForEach(workspaceSnapshot.listeningPorts, id: \.self) { port in
-                        let portLabel = SidebarPortDisplayText.label(for: port)
-                        let portTooltip = SidebarPortDisplayText.openTooltip(for: port)
-                        Button(action: {
-                            openPortLink(port)
-                        }) {
-                            Text(portLabel)
-                                .underline()
-                        }
-                        .buttonStyle(.plain)
-                        .safeHelp(portTooltip)
-                    }
-                    Spacer(minLength: 0)
-                }
-                .font(.system(size: scaledFontSize(10), design: .monospaced))
-                .foregroundColor(activeSecondaryColor(0.75))
-                .lineLimit(1)
-            }
-        }
-        .animation(.easeInOut(duration: 0.2), value: workspaceSnapshot.latestLog)
-        .animation(.easeInOut(duration: 0.2), value: workspaceSnapshot.progress != nil)
-        .animation(.easeInOut(duration: 0.2), value: workspaceSnapshot.metadataBlocks.count)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .background(
-            RoundedRectangle(cornerRadius: 6)
-                .fill(backgroundColor)
-                .overlay {
-                    RoundedRectangle(cornerRadius: 6)
-                        .strokeBorder(activeBorderColor, lineWidth: activeBorderLineWidth)
-                }
-                .overlay(alignment: .leading) {
-                    if showsLeadingRail {
-                        Capsule(style: .continuous)
-                            .fill(railColor)
-                            .frame(width: 3)
-                            .padding(.leading, 4)
-                            .padding(.vertical, 5)
-                            .offset(x: -1)
-                    }
-                }
-        )
         .sidebarShortcutHintOverlay(
-            text: showsWorkspaceShortcutHint ? workspaceShortcutLabel : nil,
+            text: cardShortcutHintText,
             emphasis: shortcutHintEmphasis,
             offsetX: sidebarShortcutHintXOffset,
             offsetY: sidebarShortcutHintYOffset,
             fontSize: scaledFontSize(10)
         )
-        .shortcutHintVisibilityAnimation(value: showsWorkspaceShortcutHint)
-        .padding(.horizontal, 6)
+        .shortcutHintVisibilityAnimation(value: cardShortcutHintText != nil)
         .background { rowHeightProbe }
         .contentShape(Rectangle())
         .opacity(isBeingDragged ? 0.6 : 1)
@@ -19301,10 +19549,11 @@ struct WindowChromeBorder: View {
     }
 }
 
-/// 1px trailing border on the sidebar, derived from the terminal chrome background.
+/// 1px trailing border on the workspace sidebar.
 private struct SidebarTrailingBorder: View {
     var body: some View {
-        WindowChromeBorder(orientation: .vertical)
+        (Color(hex: "#1E1E24") ?? Color(nsColor: NSColor(srgbRed: 0.118, green: 0.118, blue: 0.141, alpha: 1)))
+            .frame(width: 1)
     }
 }
 
