@@ -197,7 +197,7 @@ final class SessionCardSnapshotTests: XCTestCase {
     }
 
     func testIndexedWorktreeParsingRecognizesWorkspaceLaunchers() {
-        XCTAssertEqual(SessionCardSnapshot.indexedWorktreeNumber(in: "/co/backend-wk3"), 3)
+        XCTAssertEqual(SessionCardSnapshot.indexedWorktreeNumber(in: "/projects/service-wk3"), 3)
         XCTAssertEqual(SessionCardSnapshot.indexedWorktreeNumber(in: "~/ws-wk3.sh"), 3)
         XCTAssertEqual(SessionCardSnapshot.indexedWorktreeNumber(in: "[wk10] local"), 10)
         XCTAssertEqual(SessionCardSnapshot.indexedWorktreeNumber(in: "/tmp/wk7"), 7)

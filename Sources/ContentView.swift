@@ -13826,7 +13826,7 @@ enum SidebarPromptLauncherTemplateRenderer {
         workspace: Workspace
     ) -> String? {
         guard let closeHook = config.closeHook else { return nil }
-        let slot = workspace.promptLauncherSlot ?? defaultSlot(fromWorkspaceTitle: workspace.title)
+        let slot = closeHookSlot(for: workspace)
         var values: [String: String] = [
             "workspace.id": shellQuote(workspace.id.uuidString),
             "workspace.title": shellQuote(workspace.title),
@@ -13844,6 +13844,29 @@ enum SidebarPromptLauncherTemplateRenderer {
             closeHook,
             values: values
         )
+    }
+
+    @MainActor
+    static func closeHookSlot(for workspace: Workspace) -> String? {
+        if let slot = workspace.promptLauncherSlot?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !slot.isEmpty {
+            return slot
+        }
+        var candidates = [workspace.title, workspace.customTitle, workspace.currentDirectory]
+            .compactMap { $0 }
+        candidates.append(contentsOf: workspace.panelDirectories.values)
+        for paneId in workspace.bonsplitController.allPaneIds {
+            candidates.append(contentsOf: workspace.bonsplitController.tabs(inPane: paneId).map(\.title))
+        }
+        for candidate in candidates {
+            if let slot = defaultSlot(fromWorkspaceTitle: candidate) {
+                return slot
+            }
+            if let index = SessionCardSnapshot.indexedWorktreeNumber(in: candidate) {
+                return "wk\(index)"
+            }
+        }
+        return nil
     }
 
     static func metadata(from line: String, prefix: String?) -> SidebarPromptLauncherWorkspaceMetadata? {
@@ -13931,20 +13954,73 @@ enum SidebarPromptLauncherTemplateRenderer {
 }
 
 @MainActor
-private final class PromptLauncherModel: ObservableObject {
+final class PromptLauncherModel: ObservableObject {
+    struct Job: Identifiable {
+        enum State {
+            case starting
+            case waitingForWorkspace
+            case attached
+            case failed
+        }
+
+        let id: UUID
+        let prompt: String
+        let targetID: String
+        let providerID: String
+        var state: State
+        var latestLine: String
+        var workspaceID: UUID?
+    }
+
+    struct CloseJob: Identifiable {
+        enum State {
+            case running
+            case failed
+        }
+
+        let id: UUID
+        let workspaceName: String
+        let shellCommand: String
+        let environment: [String: String]
+        let forwardedSocketPath: String?
+        var state: State
+        var latestLine: String
+    }
+
     @Published var promptText: String = ""
     @Published var selectedTarget: String = ""
     @Published var selectedProvider: String = ""
-    @Published var isLoading: Bool = false
+    @Published private(set) var jobs: [Job] = []
+    @Published private(set) var closeJobs: [CloseJob] = []
+    @Published private(set) var dotPhase: Int = 0
 
     private struct RunResult {
         let succeeded: Bool
         let message: String?
     }
 
-    private var lastLogLine: String = ""
-    private var dotPhase: Int = 0
+    private final class CloseOutputState: @unchecked Sendable {
+        private let lock = NSLock()
+        private var latestLine = ""
+
+        func setLatestLine(_ line: String) {
+            lock.lock()
+            latestLine = line
+            lock.unlock()
+        }
+
+        func currentLatestLine() -> String {
+            lock.lock()
+            defer { lock.unlock() }
+            return latestLine
+        }
+    }
+
     private var dotCancellable: AnyCancellable?
+
+    var visibleJobs: [Job] {
+        jobs.filter { $0.state != .attached }
+    }
 
     func configure(_ config: CmuxPromptLauncherDefinition) {
         if !config.targets.contains(where: { $0.id == selectedTarget }) {
@@ -13963,11 +14039,91 @@ private final class PromptLauncherModel: ObservableObject {
     ) {
         configure(config)
         let prompt = promptText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !prompt.isEmpty, !isLoading else { return }
-        guard let shellCmd = SidebarPromptLauncherTemplateRenderer.renderCommand(
-            config: config,
+        guard !prompt.isEmpty else { return }
+        launch(
+            prompt: prompt,
             targetID: selectedTarget,
             providerID: selectedProvider,
+            config: config,
+            tabManager: tabManager,
+            configSourcePath: configSourcePath,
+            globalConfigPath: globalConfigPath
+        )
+    }
+
+    func retry(
+        _ job: Job,
+        config: CmuxPromptLauncherDefinition,
+        tabManager: TabManager,
+        configSourcePath: String?,
+        globalConfigPath: String
+    ) {
+        dismiss(job)
+        launch(
+            prompt: job.prompt,
+            targetID: job.targetID,
+            providerID: job.providerID,
+            config: config,
+            tabManager: tabManager,
+            configSourcePath: configSourcePath,
+            globalConfigPath: globalConfigPath
+        )
+    }
+
+    func dismiss(_ job: Job) {
+        jobs.removeAll { $0.id == job.id }
+        stopDotAnimationIfIdle()
+    }
+
+    func enqueueClose(
+        workspaceName: String,
+        shellCommand: String,
+        environment: [String: String],
+        forwardedSocketPath: String?
+    ) {
+        let job = CloseJob(
+            id: UUID(),
+            workspaceName: workspaceName,
+            shellCommand: shellCommand,
+            environment: environment,
+            forwardedSocketPath: forwardedSocketPath,
+            state: .running,
+            latestLine: String(localized: "sidebar.prompt_launcher.closing", defaultValue: "Closing workspace…")
+        )
+        closeJobs.append(job)
+        startDotAnimation()
+        runClose(job)
+    }
+
+    func retry(_ job: CloseJob) {
+        guard let index = closeJobs.firstIndex(where: { $0.id == job.id }) else { return }
+        closeJobs[index].state = .running
+        closeJobs[index].latestLine = String(
+            localized: "sidebar.prompt_launcher.closing",
+            defaultValue: "Closing workspace…"
+        )
+        startDotAnimation()
+        runClose(closeJobs[index])
+    }
+
+    func dismiss(_ job: CloseJob) {
+        closeJobs.removeAll { $0.id == job.id }
+        stopDotAnimationIfIdle()
+    }
+
+    private func launch(
+        prompt: String,
+        targetID: String,
+        providerID: String,
+        config: CmuxPromptLauncherDefinition,
+        tabManager: TabManager,
+        configSourcePath: String?,
+        globalConfigPath: String
+    ) {
+        guard let shellCmd = SidebarPromptLauncherTemplateRenderer.renderCommand(
+            config: config,
+            targetID: targetID,
+            providerID: providerID,
             prompt: prompt
         ) else {
             return
@@ -13987,6 +14143,8 @@ private final class PromptLauncherModel: ObservableObject {
                 shellCmd: shellCmd,
                 config: config,
                 prompt: prompt,
+                targetID: targetID,
+                providerID: providerID,
                 tabManager: tabManager
             )
         }
@@ -13995,54 +14153,156 @@ private final class PromptLauncherModel: ObservableObject {
     private func startLaunch(
         shellCmd: String,
         config: CmuxPromptLauncherDefinition,
-        prompt _: String,
+        prompt: String,
+        targetID: String,
+        providerID: String,
         tabManager: TabManager
     ) {
-        isLoading = true
-        lastLogLine = ""
+        let jobID = UUID()
+        jobs.append(Job(
+            id: jobID,
+            prompt: prompt,
+            targetID: targetID,
+            providerID: providerID,
+            state: .starting,
+            latestLine: String(localized: "sidebar.prompt_launcher.starting", defaultValue: "Starting…"),
+            workspaceID: nil
+        ))
         promptText = ""
         startDotAnimation()
         Task { @MainActor in
-            let result = await runPromptCommand(shellCmd: shellCmd, config: config, tabManager: tabManager)
-            stopDotAnimation()
-            isLoading = false
+            let result = await runPromptCommand(
+                jobID: jobID,
+                shellCmd: shellCmd,
+                config: config,
+                tabManager: tabManager
+            )
             if result.succeeded {
-                promptText = ""
+                jobs.removeAll { $0.id == jobID }
             } else {
                 let message = result.message?.trimmingCharacters(in: .whitespacesAndNewlines)
-                promptText = (message?.isEmpty == false) ? message! : String(localized: "sidebar.prompt_launcher.failed",
-                                                                              defaultValue: "Prompt launcher failed")
+                let attachedWorkspaceID = jobs.first(where: { $0.id == jobID })?.workspaceID
+                updateJob(jobID) { job in
+                    job.state = .failed
+                    job.latestLine = message.flatMap { $0.isEmpty ? nil : $0 } ?? String(
+                        localized: "sidebar.prompt_launcher.failed",
+                        defaultValue: "Prompt launcher failed"
+                    )
+                    if let workspaceID = attachedWorkspaceID,
+                       let workspace = tabManager.tabs.first(where: { $0.id == workspaceID }) {
+                        workspace.statusEntries["workflow"] = SidebarStatusEntry(
+                            key: "workflow",
+                            value: "Needs attention",
+                            icon: "exclamationmark.triangle.fill",
+                            color: "#E74C3C",
+                            priority: 100,
+                            timestamp: Date()
+                        )
+                    }
+                }
+                if attachedWorkspaceID != nil {
+                    jobs.removeAll { $0.id == jobID }
+                }
             }
+            stopDotAnimationIfIdle()
         }
     }
 
     private func startDotAnimation() {
+        guard dotCancellable == nil else { return }
         dotPhase = 0
         dotCancellable = Timer.publish(every: 0.4, on: .main, in: .common)
             .autoconnect()
             .sink { [weak self] _ in
                 guard let self else { return }
                 self.dotPhase = (self.dotPhase + 1) % 4
-                self.refreshPromptText()
             }
     }
 
-    private func stopDotAnimation() {
+    private func stopDotAnimationIfIdle() {
+        guard jobs.allSatisfy({ $0.state == .failed }),
+              closeJobs.allSatisfy({ $0.state == .failed }) else { return }
         dotCancellable?.cancel()
         dotCancellable = nil
     }
 
-    private func refreshPromptText() {
-        let dots = String(repeating: ".", count: dotPhase)
-        promptText = lastLogLine.isEmpty ? dots : "\(lastLogLine)\(dots)"
+    private func updateJob(_ id: UUID, update: (inout Job) -> Void) {
+        guard let index = jobs.firstIndex(where: { $0.id == id }) else { return }
+        update(&jobs[index])
     }
 
-    private func setLastLogLine(_ line: String) {
-        lastLogLine = line
-        refreshPromptText()
+    private func runClose(_ job: CloseJob) {
+        Task { @MainActor in
+            let result = await runCloseCommand(job)
+            guard let index = closeJobs.firstIndex(where: { $0.id == job.id }) else { return }
+            if result.succeeded {
+                closeJobs.remove(at: index)
+            } else {
+                closeJobs[index].state = .failed
+                let message = result.message?.trimmingCharacters(in: .whitespacesAndNewlines)
+                closeJobs[index].latestLine = message.flatMap { $0.isEmpty ? nil : $0 }
+                    ?? String(localized: "sidebar.prompt_launcher.close_failed", defaultValue: "Workspace cleanup failed")
+            }
+            stopDotAnimationIfIdle()
+        }
+    }
+
+    private func runCloseCommand(_ job: CloseJob) async -> RunResult {
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/bin/zsh")
+        proc.arguments = ["-l", "-c", job.shellCommand]
+        var env = ProcessInfo.processInfo.environment
+        for (key, value) in job.environment {
+            env[key] = value
+        }
+        if let forwardedSocketPath = job.forwardedSocketPath {
+            env["CMUX_SOCKET_PATH"] = forwardedSocketPath
+        }
+        proc.environment = env
+        proc.standardInput = FileHandle.nullDevice
+
+        let pipe = Pipe()
+        proc.standardOutput = pipe
+        proc.standardError = pipe
+
+        return await withCheckedContinuation { [weak self] continuation in
+            let outputState = CloseOutputState()
+            let recordOutput: (Data) -> Void = { [weak self] data in
+                guard !data.isEmpty, let output = String(data: data, encoding: .utf8) else { return }
+                let lines = SidebarPromptLauncherTemplateRenderer.stripAnsi(output)
+                    .components(separatedBy: "\n")
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .filter { !$0.isEmpty }
+                guard let last = lines.last else { return }
+                outputState.setLatestLine(last)
+                Task { @MainActor [weak self] in
+                    guard let index = self?.closeJobs.firstIndex(where: { $0.id == job.id }) else { return }
+                    self?.closeJobs[index].latestLine = last
+                }
+            }
+            pipe.fileHandleForReading.readabilityHandler = { handle in
+                recordOutput(handle.availableData)
+            }
+            proc.terminationHandler = { process in
+                pipe.fileHandleForReading.readabilityHandler = nil
+                recordOutput(pipe.fileHandleForReading.readDataToEndOfFile())
+                let message = outputState.currentLatestLine()
+                continuation.resume(returning: RunResult(
+                    succeeded: process.terminationStatus == 0,
+                    message: process.terminationStatus == 0 ? nil : message
+                ))
+            }
+            do {
+                try proc.run()
+            } catch {
+                pipe.fileHandleForReading.readabilityHandler = nil
+                continuation.resume(returning: RunResult(succeeded: false, message: error.localizedDescription))
+            }
+        }
     }
 
     private func runPromptCommand(
+        jobID: UUID,
         shellCmd: String,
         config: CmuxPromptLauncherDefinition,
         tabManager: TabManager
@@ -14066,8 +14326,6 @@ private final class PromptLauncherModel: ObservableObject {
         proc.standardInput = FileHandle.nullDevice
 
         return await withCheckedContinuation { [weak self] (cont: CheckedContinuation<RunResult, Never>) in
-            // Thread-safe single-fire unlock: resume the continuation exactly once,
-            // either when the workspace appears in cmux or when the process exits.
             let lock = NSLock()
             var resumed = false
             var latestLine = ""
@@ -14102,7 +14360,10 @@ private final class PromptLauncherModel: ObservableObject {
                 }
                 #endif
                 Task { @MainActor [weak self, weak tabManager] in
-                    self?.setLastLogLine(last)
+                    self?.updateJob(jobID) { job in
+                        job.latestLine = last
+                        if job.state == .starting { job.state = .waitingForWorkspace }
+                    }
                     guard let tabManager else { return }
                     for line in newLines {
                         if let metadata = SidebarPromptLauncherTemplateRenderer.metadata(
@@ -14112,18 +14373,9 @@ private final class PromptLauncherModel: ObservableObject {
                             #if DEBUG
                             cmuxDebugLog("promptLauncher.metadata workspace=\(metadata.workspace ?? "nil") title=\(metadata.title ?? "nil") color=\(metadata.color ?? "nil") slot=\(metadata.slot ?? "nil")")
                             #endif
-                            self?.applyMetadata(metadata, tabManager: tabManager)
+                            self?.applyMetadata(metadata, jobID: jobID, tabManager: tabManager)
                         }
                     }
-                }
-                if newLines.contains(where: {
-                    SidebarPromptLauncherTemplateRenderer.isCompletionLine($0, patterns: config.completionPatterns)
-                }) {
-                    pipe.fileHandleForReading.readabilityHandler = nil
-                    #if DEBUG
-                    cmuxDebugLog("promptLauncher.completionPattern matched")
-                    #endif
-                    resume(RunResult(succeeded: true, message: nil))
                 }
             }
             proc.terminationHandler = { process in
@@ -14150,6 +14402,7 @@ private final class PromptLauncherModel: ObservableObject {
 
     private func applyMetadata(
         _ metadata: SidebarPromptLauncherWorkspaceMetadata,
+        jobID: UUID,
         tabManager: TabManager
     ) {
         guard let workspace = resolveWorkspace(metadata.workspace, tabManager: tabManager) else {
@@ -14168,6 +14421,10 @@ private final class PromptLauncherModel: ObservableObject {
         if let slot = metadata.slot?.trimmingCharacters(in: .whitespacesAndNewlines),
            !slot.isEmpty {
             workspace.promptLauncherSlot = slot
+        }
+        updateJob(jobID) { job in
+            job.workspaceID = workspace.id
+            job.state = .attached
         }
     }
 
@@ -14334,7 +14591,6 @@ private struct PromptLauncherChoiceMenu: View {
 }
 
 private struct PromptLauncherSubmitButton: View {
-    let isLoading: Bool
     let canSend: Bool
     let action: () -> Void
 
@@ -14345,41 +14601,189 @@ private struct PromptLauncherSubmitButton: View {
                     .fill(backgroundColor)
                     .frame(width: 31, height: 31)
 
-                if isLoading {
-                    PromptLauncherSpinningDots(size: 17, color: promptLauncherColor("#78BBFF"))
-                } else {
-                    Image(systemName: "arrow.up")
-                        .font(.system(size: 13, weight: .bold))
-                        .foregroundColor(.white)
-                }
+                Image(systemName: "arrow.up")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundColor(.white)
             }
             .overlay(
                 Circle()
                     .strokeBorder(borderColor, lineWidth: 1)
             )
-            .opacity(canSend || isLoading ? 1 : 0.48)
+            .opacity(canSend ? 1 : 0.48)
         }
         .buttonStyle(.plain)
-        .disabled(!canSend || isLoading)
+        .disabled(!canSend)
         .keyboardShortcut(.return, modifiers: [.command])
         .accessibilityLabel(String(localized: "sidebar.prompt_launcher.send",
                                    defaultValue: "Send"))
     }
 
     private var backgroundColor: Color {
-        if isLoading {
-            return promptLauncherColor("#1C1C22")
-        }
         return canSend ? promptLauncherColor("#1F6FEB") : promptLauncherColor("#25252B")
     }
 
     private var borderColor: Color {
-        isLoading ? promptLauncherColor("#2A2A31") : Color.white.opacity(0.08)
+        Color.white.opacity(0.08)
+    }
+}
+
+private struct PromptLauncherPendingCard: View {
+    let job: PromptLauncherModel.Job
+    let dots: String
+    let onRetry: () -> Void
+    let onDismiss: () -> Void
+
+    var body: some View {
+        HStack(spacing: 0) {
+            RoundedRectangle(cornerRadius: 2, style: .continuous)
+                .fill(accentColor)
+                .frame(width: 3, height: job.state == .failed ? 76 : 62)
+
+            VStack(alignment: .leading, spacing: 7) {
+                HStack(spacing: 7) {
+                    Image(systemName: job.state == .failed ? "exclamationmark.triangle.fill" : "sparkles")
+                        .foregroundColor(accentColor)
+                    Text(job.prompt)
+                        .font(.custom("Inter", size: 12).weight(.semibold))
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                    if job.state != .failed {
+                        PromptLauncherSpinningDots(size: 12, color: accentColor)
+                    }
+                }
+
+                HStack(spacing: 8) {
+                    Label(job.targetID, systemImage: job.targetID.contains("devbox") ? "server.rack" : "laptopcomputer")
+                    Label(job.providerID, systemImage: "chevron.left.forwardslash.chevron.right")
+                }
+                .font(.custom("Inter", size: 10))
+                .foregroundColor(promptLauncherColor("#8A8A95"))
+
+                HStack(spacing: 7) {
+                    Text(displayStatus + (job.state == .failed ? "" : dots))
+                        .font(.custom("Inter", size: 10).weight(.semibold))
+                        .foregroundColor(accentColor)
+                        .lineLimit(1)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 2)
+                        .background(Capsule(style: .continuous).fill(accentColor.opacity(0.14)))
+                        .overlay(Capsule(style: .continuous).strokeBorder(accentColor.opacity(0.3), lineWidth: 0.5))
+                    Spacer(minLength: 0)
+                    if job.state == .failed {
+                        Button(String(localized: "sidebar.prompt_launcher.retry", defaultValue: "Retry"), action: onRetry)
+                        Button(String(localized: "sidebar.prompt_launcher.dismiss", defaultValue: "Dismiss"), action: onDismiss)
+                    }
+                }
+                .buttonStyle(.borderless)
+                .font(.custom("Inter", size: 10).weight(.medium))
+            }
+            .padding(10)
+        }
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(promptLauncherColor(job.state == .failed ? "#241719" : "#17171B"))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(promptLauncherColor(job.state == .failed ? "#6E2D32" : "#25252B"), lineWidth: 1)
+        )
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var accentColor: Color {
+        promptLauncherColor(job.state == .failed ? "#F85149" : "#78BBFF")
+    }
+
+    private var displayStatus: String {
+        let trimmed = job.latestLine.trimmingCharacters(in: .whitespacesAndNewlines)
+        let withoutStep = trimmed.replacingOccurrences(
+            of: #"^[^A-Za-z0-9\[]*(?:\[?\d+\/\d+\]?\s*)?"#,
+            with: "",
+            options: .regularExpression
+        )
+        guard !withoutStep.isEmpty else {
+            return String(localized: "sidebar.prompt_launcher.creating", defaultValue: "Creating workspace")
+        }
+        return withoutStep.prefix(1).uppercased() + withoutStep.dropFirst()
     }
 }
 
 private struct SidebarPromptLauncher: View {
-    @StateObject private var model = PromptLauncherModel()
+    @EnvironmentObject var tabManager: TabManager
+
+    var body: some View {
+        SidebarPromptLauncherContent(model: tabManager.promptLauncherModel)
+    }
+}
+
+private struct PromptLauncherClosingCard: View {
+    let job: PromptLauncherModel.CloseJob
+    let dots: String
+    let onRetry: () -> Void
+    let onDismiss: () -> Void
+
+    var body: some View {
+        HStack(spacing: 0) {
+            RoundedRectangle(cornerRadius: 2, style: .continuous)
+                .fill(accentColor)
+                .frame(width: 3, height: job.state == .failed ? 76 : 62)
+
+            VStack(alignment: .leading, spacing: 7) {
+                HStack(spacing: 7) {
+                    Image(systemName: job.state == .failed ? "exclamationmark.triangle.fill" : "xmark.circle")
+                        .foregroundColor(accentColor)
+                    Text(job.workspaceName)
+                        .font(.custom("Inter", size: 12).weight(.semibold))
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                    if job.state != .failed {
+                        PromptLauncherSpinningDots(size: 12, color: accentColor)
+                    }
+                }
+
+                Text(displayStatus + (job.state == .failed ? "" : dots))
+                    .font(.custom("Inter", size: 10).weight(.semibold))
+                    .foregroundColor(accentColor)
+                    .lineLimit(1)
+
+                if job.state == .failed {
+                    HStack {
+                        Spacer(minLength: 0)
+                        Button(String(localized: "sidebar.prompt_launcher.retry", defaultValue: "Retry"), action: onRetry)
+                        Button(String(localized: "sidebar.prompt_launcher.dismiss", defaultValue: "Dismiss"), action: onDismiss)
+                    }
+                    .buttonStyle(.borderless)
+                    .font(.custom("Inter", size: 10).weight(.medium))
+                }
+            }
+            .padding(10)
+        }
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(promptLauncherColor(job.state == .failed ? "#241719" : "#17171B"))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(promptLauncherColor(job.state == .failed ? "#6E2D32" : "#25252B"), lineWidth: 1)
+        )
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var accentColor: Color {
+        promptLauncherColor(job.state == .failed ? "#F85149" : "#78BBFF")
+    }
+
+    private var displayStatus: String {
+        let trimmed = job.latestLine.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return String(localized: "sidebar.prompt_launcher.closing", defaultValue: "Closing workspace…")
+        }
+        return trimmed.prefix(1).uppercased() + trimmed.dropFirst()
+    }
+}
+
+private struct SidebarPromptLauncherContent: View {
+    @ObservedObject var model: PromptLauncherModel
     @EnvironmentObject var tabManager: TabManager
     @EnvironmentObject var cmuxConfigStore: CmuxConfigStore
 
@@ -14387,14 +14791,13 @@ private struct SidebarPromptLauncher: View {
         Group {
             if let config = cmuxConfigStore.promptLauncher {
                 let canSend = !model.promptText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                    && !model.isLoading
 
                 VStack(alignment: .leading, spacing: 8) {
                     PromptTextEditorContainer(
                         text: $model.promptText,
                         placeholder: String(localized: "sidebar.prompt_launcher.placeholder",
                                             defaultValue: "Prompt\u{2026}"),
-                        isEditable: !model.isLoading,
+                        isEditable: true,
                         onSubmit: {
                             model.launch(
                                 config: config,
@@ -14424,7 +14827,6 @@ private struct SidebarPromptLauncher: View {
                         Spacer(minLength: 0)
 
                         PromptLauncherSubmitButton(
-                            isLoading: model.isLoading,
                             canSend: canSend
                         ) {
                             if canSend {
@@ -14438,6 +14840,32 @@ private struct SidebarPromptLauncher: View {
                         }
                     }
                     .overlay(PromptLauncherArrowCursorArea())
+
+                    ForEach(model.visibleJobs) { job in
+                        PromptLauncherPendingCard(
+                            job: job,
+                            dots: String(repeating: ".", count: model.dotPhase),
+                            onRetry: {
+                                model.retry(
+                                    job,
+                                    config: config,
+                                    tabManager: tabManager,
+                                    configSourcePath: cmuxConfigStore.promptLauncherSourcePath,
+                                    globalConfigPath: cmuxConfigStore.globalConfigPath
+                                )
+                            },
+                            onDismiss: { model.dismiss(job) }
+                        )
+                    }
+
+                    ForEach(model.closeJobs) { job in
+                        PromptLauncherClosingCard(
+                            job: job,
+                            dots: String(repeating: ".", count: model.dotPhase),
+                            onRetry: { model.retry(job) },
+                            onDismiss: { model.dismiss(job) }
+                        )
+                    }
                 }
                 .padding(9)
                 .background(
@@ -14524,9 +14952,6 @@ private struct SidebarFooterButtons: View {
                 .accessibilityLabel(String(localized: "sidebar.extensions.browser.title", defaultValue: "Sidebar Extensions"))
                 .accessibilityIdentifier("SidebarExtensionMenuButton")
                 .background(TitlebarControlAnchorView { extensionBrowserAnchorView = $0 })
-            }
-            if let updateActionsHost = AppDelegate.shared {
-                UpdatePill(model: updateViewModel, accent: cmuxAccentColor(), actions: updateActionsHost)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -16369,8 +16794,31 @@ struct TabItemView: View, Equatable {
             mode: sessionCardMode(from: workspaceSnapshot),
             status: sessionCardStatus(from: workspaceSnapshot),
             diff: sessionCardDiff(from: workspaceSnapshot),
-            badge: sessionCardBadge(from: workspaceSnapshot)
+            badge: sessionCardBadge(from: workspaceSnapshot),
+            statusLabel: sessionCardStatusLabel()
         )
+    }
+
+    private func sessionCardStatusLabel() -> SessionCardSnapshot.StatusLabel? {
+        let preferredKeys: Set<String> = ["workflow", "agent", "wk", "session"]
+        let entry = tab.sidebarStatusEntriesVisibleForDisplay()
+            .filter { preferredKeys.contains($0.key) }
+            .max { lhs, rhs in
+                if lhs.priority != rhs.priority { return lhs.priority < rhs.priority }
+                return lhs.timestamp < rhs.timestamp
+            }
+        guard let entry else { return nil }
+        let rawValue = entry.value
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
+        let withoutStep = rawValue.replacingOccurrences(
+            of: #"^\[?\d+\/\d+\]?\s*"#,
+            with: "",
+            options: .regularExpression
+        )
+        let value = withoutStep.prefix(1).uppercased() + withoutStep.dropFirst()
+        guard !value.isEmpty else { return nil }
+        return SessionCardSnapshot.StatusLabel(value: value, icon: entry.icon, colorHex: entry.color)
     }
 
     private func sessionCardDisplayName(from workspaceSnapshot: SidebarWorkspaceSnapshotBuilder.Snapshot) -> String {
@@ -16473,7 +16921,7 @@ struct TabItemView: View, Equatable {
                 agent.workingDirectory,
                 agent.launchCommand?.workingDirectory,
                 agent.launchCommand?.executablePath,
-                agent.launchCommand?.environment?["SAMSARA_WORKTREE"],
+                agent.launchCommand?.environment?["CMUX_WORKTREE_SLOT"],
             ].compactMap { $0 })
             candidates.append(contentsOf: agent.launchCommand?.arguments ?? [])
         }
@@ -16707,7 +17155,13 @@ struct TabItemView: View, Equatable {
             snapshot: cardSnapshot,
             isActive: isActive || isMultiSelected,
             isHovered: rowInteractionState.isPointerHovering,
-            fontScale: fontScale
+            fontScale: fontScale,
+            onClose: {
+                #if DEBUG
+                cmuxDebugLog("sidebar.close workspace=\(tab.id.uuidString.prefix(5)) method=sessionCardButton")
+                #endif
+                tabManager.closeWorkspaceWithConfirmation(tab)
+            }
         )
         .padding(.horizontal, 9)
 

@@ -6,6 +6,7 @@ struct SessionCard: View {
     let isActive: Bool
     let isHovered: Bool
     let fontScale: CGFloat
+    let onClose: () -> Void
 
     var body: some View {
         ZStack(alignment: .leading) {
@@ -49,8 +50,20 @@ struct SessionCard: View {
                 .truncationMode(.tail)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-            SessionCardStatusDot(status: snapshot.status)
-                .accessibilityLabel(Text(snapshot.status.accessibilityLabel))
+            Button(action: onClose) {
+                Image(systemName: "xmark")
+                    .font(.system(size: scaled(9), weight: .semibold))
+                    .foregroundColor(hexColor("#8A8A95"))
+                    .frame(width: scaled(20), height: scaled(20))
+                    .background(
+                        Circle()
+                            .fill(Color.white.opacity(isHovered ? 0.08 : 0.001))
+                    )
+            }
+            .buttonStyle(.plain)
+            .contentShape(Circle())
+            .help(String(localized: "sidebar.workspace.closeButton", defaultValue: "Close Workspace"))
+            .accessibilityLabel(Text(String(localized: "sidebar.workspace.closeButton", defaultValue: "Close Workspace")))
         }
     }
 
@@ -107,6 +120,23 @@ struct SessionCard: View {
 
             Spacer(minLength: 0)
 
+            if let statusLabel = snapshot.statusLabel {
+                HStack(spacing: 4) {
+                    if let icon = statusLabel.icon, !icon.isEmpty {
+                        Image(systemName: icon)
+                            .font(.system(size: scaled(9), weight: .semibold))
+                    }
+                    Text(statusLabel.value)
+                        .lineLimit(1)
+                }
+                .font(.custom("Inter", size: scaled(10)).weight(.semibold))
+                .foregroundColor(statusLabelColor(statusLabel))
+                .padding(.horizontal, 7)
+                .padding(.vertical, 2)
+                .background(Capsule(style: .continuous).fill(statusLabelColor(statusLabel).opacity(0.14)))
+                .overlay(Capsule(style: .continuous).strokeBorder(statusLabelColor(statusLabel).opacity(0.3), lineWidth: 0.5))
+            }
+
             if !snapshot.diff.isEmpty {
                 HStack(spacing: 5) {
                     Text("+\(snapshot.diff.added)")
@@ -135,12 +165,12 @@ struct SessionCard: View {
 
     private var backgroundColor: Color {
         if isActive {
-            return SessionCardColor.oklabMix(colorHex: snapshot.colorHex, amount: 0.10, over: "#17171C")
+            return SessionCardColor.oklabMix(colorHex: snapshot.colorHex, amount: 0.22, over: "#17171C")
         }
         if isHovered {
-            return hexColor("#1C1C22")
+            return SessionCardColor.oklabMix(colorHex: snapshot.colorHex, amount: 0.13, over: "#1C1C22")
         }
-        return hexColor("#17171B")
+        return SessionCardColor.oklabMix(colorHex: snapshot.colorHex, amount: 0.09, over: "#17171B")
     }
 
     private var borderColor: Color {
@@ -171,6 +201,10 @@ struct SessionCard: View {
         case .defaultMode:
             return hexColor("#9A9AA5")
         }
+    }
+
+    private func statusLabelColor(_ label: SessionCardSnapshot.StatusLabel) -> Color {
+        SessionCardColor.color(hex: label.colorHex ?? "#78BBFF", fallbackHex: "#78BBFF")
     }
 
     private func scaled(_ size: CGFloat) -> CGFloat {
@@ -240,53 +274,6 @@ private struct SessionCardBadge: View {
 
     private func hexColor(_ hex: String) -> Color {
         SessionCardColor.color(hex: hex, fallbackHex: "#FFFFFF")
-    }
-}
-
-private struct SessionCardStatusDot: View {
-    let status: SessionCardSnapshot.Status
-    @State private var pulse = false
-
-    var body: some View {
-        Circle()
-            .fill(dotColor)
-            .frame(width: 7, height: 7)
-            .background(
-                Circle()
-                    .fill(dotColor.opacity(0.18))
-                    .frame(width: 13, height: 13)
-            )
-            .opacity(status == .running ? (pulse ? 0.3 : 1) : 1)
-            .scaleEffect(status == .running ? (pulse ? 0.78 : 1) : 1)
-            .onAppear {
-                updatePulse(status)
-            }
-            .onChange(of: status) { newStatus in
-                updatePulse(newStatus)
-            }
-    }
-
-    private var dotColor: Color {
-        switch status {
-        case .connected:
-            return SessionCardColor.color(hex: "#3FB950", fallbackHex: "#3FB950")
-        case .running:
-            return SessionCardColor.color(hex: "#4493F8", fallbackHex: "#4493F8")
-        case .waiting:
-            return SessionCardColor.color(hex: "#D29922", fallbackHex: "#D29922")
-        case .idle:
-            return SessionCardColor.color(hex: "#6E7681", fallbackHex: "#6E7681")
-        }
-    }
-
-    private func updatePulse(_ status: SessionCardSnapshot.Status) {
-        guard status == .running else {
-            pulse = false
-            return
-        }
-        withAnimation(.easeInOut(duration: 1.5).repeatForever(autoreverses: true)) {
-            pulse = true
-        }
     }
 }
 

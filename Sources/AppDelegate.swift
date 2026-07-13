@@ -4334,6 +4334,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     ) {
         let key = ObjectIdentifier(window)
         forgetRecoverableMainWindowRoute(windowId: windowId)
+        wirePromptLauncherConfig(cmuxConfigStore, into: tabManager)
         #if DEBUG
         let priorManagerToken = debugManagerToken(self.tabManager)
         #endif
@@ -4433,6 +4434,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         }
     }
 
+    private func wirePromptLauncherConfig(_ cmuxConfigStore: CmuxConfigStore?, into tabManager: TabManager) {
+        if let cmuxConfigStore {
+            tabManager.cmuxConfigStore = cmuxConfigStore
+        }
+    }
+
 #if DEBUG
     @discardableResult
     func registerMainWindowContextForTesting(
@@ -4441,6 +4448,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         cmuxConfigStore: CmuxConfigStore? = nil,
         fileExplorerState: FileExplorerState? = nil
     ) -> UUID {
+        wirePromptLauncherConfig(cmuxConfigStore, into: tabManager)
         mainWindowContexts[ObjectIdentifier(tabManager)] = MainWindowContext(
             windowId: windowId,
             tabManager: tabManager,

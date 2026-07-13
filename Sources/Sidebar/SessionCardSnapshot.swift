@@ -117,6 +117,12 @@ struct SessionCardSnapshot: Equatable {
         }
     }
 
+    struct StatusLabel: Equatable {
+        let value: String
+        let icon: String?
+        let colorHex: String?
+    }
+
     let workspaceNumber: Int
     let badge: Badge
     let name: String
@@ -126,6 +132,7 @@ struct SessionCardSnapshot: Equatable {
     let modelName: String?
     let mode: Mode
     let status: Status
+    let statusLabel: StatusLabel?
     let diff: Diff
 
     init(
@@ -138,7 +145,8 @@ struct SessionCardSnapshot: Equatable {
         mode: Mode,
         status: Status,
         diff: Diff,
-        badge: Badge? = nil
+        badge: Badge? = nil,
+        statusLabel: StatusLabel? = nil
     ) {
         self.workspaceNumber = min(10, max(1, workspaceNumber))
         self.badge = badge ?? .indexedWorktree(self.workspaceNumber)
@@ -149,6 +157,7 @@ struct SessionCardSnapshot: Equatable {
         self.modelName = Self.nonEmpty(modelName)
         self.mode = mode
         self.status = status
+        self.statusLabel = statusLabel
         self.diff = diff
     }
 
@@ -178,13 +187,14 @@ struct SessionCardSnapshot: Equatable {
             .replacingOccurrences(of: "\\", with: "/")
             .replacingOccurrences(of: "~", with: "/")
         for component in normalizedPath.split(separator: "/", omittingEmptySubsequences: true) {
-            if let slot = indexedWorktreeNumber(inPathComponent: component, prefix: "backend-wk") {
-                return slot
-            }
             if let slot = indexedWorktreeNumber(inPathComponent: component, prefix: "ws-wk") {
                 return slot
             }
             if let slot = indexedWorktreeNumber(inPathComponent: component, prefix: "wk") {
+                return slot
+            }
+            if let marker = component.range(of: "-wk", options: .backwards),
+               let slot = Int(component[marker.upperBound...]) {
                 return slot
             }
         }

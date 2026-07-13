@@ -1023,6 +1023,7 @@ struct WorkspaceGroup: Identifiable, Equatable, Sendable {
 @MainActor
 class TabManager: ObservableObject {
     weak var cmuxConfigStore: CmuxConfigStore?
+    let promptLauncherModel = PromptLauncherModel()
 
     private enum WorkspacePullRequestSnapshot: Equatable {
         case deferred
@@ -5258,42 +5259,60 @@ class TabManager: ObservableObject {
     }
 
     private func triggerPromptLauncherCloseHook(workspace: Workspace, delayBeforeRun: Bool = false) {
-        guard let cmuxConfigStore,
-              let promptLauncher = cmuxConfigStore.promptLauncher,
-              let shellCommand = SidebarPromptLauncherTemplateRenderer.renderCloseHook(
-                  config: promptLauncher,
-                  workspace: workspace
-              ),
-              CmuxConfigExecutor.isPromptLauncherTrusted(
-                  promptLauncher,
-                  configSourcePath: cmuxConfigStore.promptLauncherSourcePath,
-                  globalConfigPath: cmuxConfigStore.globalConfigPath
-              ) else {
+        guard let cmuxConfigStore else {
+            #if DEBUG
+            cmuxDebugLog("promptLauncher.closeHook skipped reason=configStoreMissing workspace=\(workspace.id)")
+            #endif
+            return
+        }
+        guard let promptLauncher = cmuxConfigStore.promptLauncher else {
+            #if DEBUG
+            cmuxDebugLog("promptLauncher.closeHook skipped reason=launcherMissing workspace=\(workspace.id)")
+            #endif
+            return
+        }
+        guard let shellCommand = SidebarPromptLauncherTemplateRenderer.renderCloseHook(
+            config: promptLauncher,
+            workspace: workspace
+        ) else {
+            #if DEBUG
+            let slot = SidebarPromptLauncherTemplateRenderer.closeHookSlot(for: workspace) ?? "nil"
+            cmuxDebugLog("promptLauncher.closeHook skipped reason=renderFailed workspace=\(workspace.id) slot=\(slot)")
+            #endif
+            return
+        }
+        guard CmuxConfigExecutor.isPromptLauncherTrusted(
+            promptLauncher,
+            configSourcePath: cmuxConfigStore.promptLauncherSourcePath,
+            globalConfigPath: cmuxConfigStore.globalConfigPath
+        ) else {
+            #if DEBUG
+            cmuxDebugLog("promptLauncher.closeHook skipped reason=untrusted workspace=\(workspace.id)")
+            #endif
             return
         }
         let environment = promptLauncher.environment
         let shouldForwardSocket = promptLauncher.forwardCmuxSocket
         let socketPath = TerminalController.shared.currentSocketPathForRemoteRestore()
-        Task.detached(priority: .utility) {
-            if delayBeforeRun {
-                try? await Task.sleep(nanoseconds: 300_000_000)
-            }
+        let workspaceName = workspace.customTitle ?? workspace.title
+        let enqueue = { [promptLauncherModel] in
             #if DEBUG
             cmuxDebugLog("promptLauncher.closeHook triggered command=\(shellCommand)")
             #endif
-            let proc = Process()
-            proc.executableURL = URL(fileURLWithPath: "/bin/zsh")
-            proc.arguments = ["-l", "-c", shellCommand]
-            var env = ProcessInfo.processInfo.environment
-            for (key, value) in environment {
-                env[key] = value
+            promptLauncherModel.enqueueClose(
+                workspaceName: workspaceName,
+                shellCommand: shellCommand,
+                environment: environment,
+                forwardedSocketPath: shouldForwardSocket ? socketPath : nil
+            )
+        }
+        if delayBeforeRun {
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 300_000_000)
+                enqueue()
             }
-            if shouldForwardSocket, let socketPath {
-                env["CMUX_SOCKET_PATH"] = socketPath
-            }
-            proc.environment = env
-            proc.standardInput = FileHandle.nullDevice
-            try? proc.run()
+        } else {
+            enqueue()
         }
     }
 

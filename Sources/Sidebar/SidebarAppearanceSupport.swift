@@ -266,7 +266,9 @@ enum SidebarWorkspaceRowBackgroundSettings {
     static let inactiveMultiSelectOpacityKey = "workspaceColors.inactiveMultiSelectOpacity"
 
     static let defaultMode: SidebarWorkspaceRowBackgroundMode = .customColorAlways
-    static let defaultInactiveOpacity = 0.7
+    // Keep every workspace's assigned color visible while leaving a clear,
+    // full-opacity step up for the active workspace.
+    static let defaultInactiveOpacity = 0.55
     static let defaultInactiveMultiSelectOpacity = 0.35
 
     static func mode(defaults: UserDefaults = .standard) -> SidebarWorkspaceRowBackgroundMode {
