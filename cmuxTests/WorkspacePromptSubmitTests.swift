@@ -55,7 +55,7 @@ final class WorkspacePromptSubmitTests: XCTestCase {
 
     func testPromptLauncherParsesWorkspaceMetadataLine() throws {
         let metadata = try XCTUnwrap(SidebarPromptLauncherTemplateRenderer.metadata(
-            from: #"CMUX_WORKSPACE_JSON:{"workspace":"workspace:3","title":"[wk3] Search","color":"#3b82f6","slot":"wk3"}"#,
+            from: ##"CMUX_WORKSPACE_JSON:{"workspace":"workspace:3","title":"[wk3] Search","color":"#3b82f6","slot":"wk3"}"##,
             prefix: "CMUX_WORKSPACE_JSON:"
         ))
 
@@ -83,6 +83,78 @@ final class WorkspacePromptSubmitTests: XCTestCase {
             SidebarPromptLauncherTemplateRenderer.renderCloseHook(config: config, workspace: workspace),
             "workspace-reset 'wk9'"
         )
+
+        workspace.promptLauncherSlot = nil
+        workspace.currentDirectory = "/Users/example/projects/service-wk4"
+        workspace.setCustomTitle("Search cleanup")
+        XCTAssertEqual(
+            SidebarPromptLauncherTemplateRenderer.renderCloseHook(config: config, workspace: workspace),
+            "workspace-reset 'wk4'"
+        )
+    }
+
+    func testPromptLauncherCloseJobDisappearsAfterSuccessfulCleanup() async throws {
+        let model = PromptLauncherModel()
+        model.enqueueClose(
+            workspaceName: "Search cleanup",
+            shellCommand: "printf 'Resetting wk7\\n'; exit 0",
+            environment: [:],
+            forwardedSocketPath: nil
+        )
+
+        XCTAssertEqual(model.closeJobs.count, 1)
+        try await waitUntil { model.closeJobs.isEmpty }
+    }
+
+    func testPromptLauncherCloseJobRetainsFailureUntilDismissed() async throws {
+        let model = PromptLauncherModel()
+        model.enqueueClose(
+            workspaceName: "Search cleanup",
+            shellCommand: "printf 'Could not reset wk7\\n'; exit 23",
+            environment: [:],
+            forwardedSocketPath: nil
+        )
+
+        try await waitUntil { model.closeJobs.first?.state == .failed }
+        let failedJob = try XCTUnwrap(model.closeJobs.first)
+        XCTAssertEqual(failedJob.latestLine, "Could not reset wk7")
+
+        model.dismiss(failedJob)
+        XCTAssertTrue(model.closeJobs.isEmpty)
+    }
+
+    func testPromptLauncherCloseJobRetryReusesCommandAndClearsAfterSuccess() async throws {
+        let marker = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cmux-close-job-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: marker) }
+        let quotedMarker = SidebarPromptLauncherTemplateRenderer.shellQuote(marker.path)
+        let model = PromptLauncherModel()
+        model.enqueueClose(
+            workspaceName: "Search cleanup",
+            shellCommand: "if test -f \(quotedMarker); then exit 0; else touch \(quotedMarker); exit 1; fi",
+            environment: [:],
+            forwardedSocketPath: nil
+        )
+
+        try await waitUntil { model.closeJobs.first?.state == .failed }
+        let failedJob = try XCTUnwrap(model.closeJobs.first)
+        model.retry(failedJob)
+
+        try await waitUntil { model.closeJobs.isEmpty }
+    }
+
+    private func waitUntil(
+        timeout: TimeInterval = 2,
+        condition: @escaping @MainActor () -> Bool
+    ) async throws {
+        let deadline = Date().addingTimeInterval(timeout)
+        while !condition() {
+            if Date() >= deadline {
+                XCTFail("Timed out waiting for prompt launcher job state")
+                return
+            }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
     }
 
     func testPromptSubmitRecordsMessageAndMovesWorkspaceToTopWhenIMessageModeEnabled() throws {

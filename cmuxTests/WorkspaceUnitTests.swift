@@ -194,7 +194,7 @@ final class SidebarSelectedWorkspaceColorTests: XCTestCase {
         )
 
         XCTAssertEqual(background.color?.hexString(), "#C0392B")
-        XCTAssertEqual(background.opacity, 0.7, accuracy: 0.001)
+        XCTAssertEqual(background.opacity, 0.55, accuracy: 0.001)
     }
 
     @MainActor
@@ -237,7 +237,7 @@ final class SidebarSelectedWorkspaceColorTests: XCTestCase {
         )
 
         XCTAssertEqual(background.color?.hexString(), "#C0392B")
-        XCTAssertEqual(background.opacity, 0.7, accuracy: 0.001)
+        XCTAssertEqual(background.opacity, 0.55, accuracy: 0.001)
     }
 
     @MainActor
