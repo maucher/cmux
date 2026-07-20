@@ -10670,6 +10670,15 @@ struct VerticalTabsSidebar: View {
     @State private var collapsedExtensionSidebarSectionIds: Set<String> = []
     @State private var extensionSidebarWorktreeCreationInFlightSectionIds: Set<String> = []
     @State private var extensionSidebarUpdateToken: UInt64 = 0
+    @State private var sessionGroupingRevision: UInt64 = 0
+    @AppStorage("sidebar.sessionStatusGroup.pinned.collapsed")
+    private var pinnedSessionGroupCollapsed = false
+    @AppStorage("sidebar.sessionStatusGroup.needsAttention.collapsed")
+    private var needsAttentionSessionGroupCollapsed = false
+    @AppStorage("sidebar.sessionStatusGroup.running.collapsed")
+    private var runningSessionGroupCollapsed = false
+    @AppStorage("sidebar.sessionStatusGroup.finished.collapsed")
+    private var finishedSessionGroupCollapsed = false
     /// Bumped whenever any workspace's currentDirectory changes; the group
     /// header's resolved cwd-based config (color/icon/context menu /
     /// newWorkspacePlacement) reads it through the body, so a state
@@ -11011,11 +11020,13 @@ struct VerticalTabsSidebar: View {
         let workspaceGroups: [WorkspaceGroup]
         let workspaceGroupById: [UUID: WorkspaceGroup]
         let workspaceGroupMenuSnapshot: WorkspaceGroupMenuSnapshot
+        let sessionStatusByWorkspaceId: [UUID: SessionCardSnapshot.Status]
 
         var workspaceIds: [UUID] { tabIds }
     }
 
     var body: some View {
+        let _ = sessionGroupingRevision
         let tabs = tabManager.tabs
         let workspaceCount = tabs.count
         let canCloseWorkspace = workspaceCount > 1
@@ -11040,6 +11051,9 @@ struct VerticalTabsSidebar: View {
         let workspaceGroupMenuSnapshot = WorkspaceGroupMenuSnapshot(
             items: workspaceGroups.map { WorkspaceGroupMenuSnapshot.Item(id: $0.id, name: $0.name) }
         )
+        let sessionStatusByWorkspaceId = Dictionary(uniqueKeysWithValues: tabs.map {
+            ($0.id, SessionCardSnapshot.Status.resolve(workspace: $0))
+        })
         let draggedSidebarTabId = dragState.draggedTabId
         let sidebarReorderIds = draggedSidebarTabId.map {
             tabManager.sidebarReorderWorkspaceIds(
@@ -11063,7 +11077,8 @@ struct VerticalTabsSidebar: View {
             allSelectedRemoteContextMenuTargetsDisconnected: allSelectedRemoteContextMenuTargetsDisconnected,
             workspaceGroups: workspaceGroups,
             workspaceGroupById: workspaceGroupById,
-            workspaceGroupMenuSnapshot: workspaceGroupMenuSnapshot
+            workspaceGroupMenuSnapshot: workspaceGroupMenuSnapshot,
+            sessionStatusByWorkspaceId: sessionStatusByWorkspaceId
         )
 
         ZStack(alignment: .bottomLeading) {
@@ -11274,6 +11289,9 @@ struct VerticalTabsSidebar: View {
                 }
                 .onReceive(NotificationCenter.default.publisher(for: .workspaceOrderDidChange)) { notification in
                     requestSelectedWorkspaceScrollAfterWorkspaceOrderChange(notification)
+                }
+                .onReceive(sessionGroupingObservationPublisher(renderContext: renderContext)) { _ in
+                    sessionGroupingRevision &+= 1
                 }
                 .onReceive(NotificationCenter.default.publisher(for: .workspaceCurrentDirectoryDidChange)) { _ in
                     // Drive a revision counter that the group-header resolver
@@ -11535,6 +11553,16 @@ struct VerticalTabsSidebar: View {
         renderContext: WorkspaceListRenderContext
     ) -> AnyPublisher<Void, Never> {
         let publishers = renderContext.tabs.map(\.sidebarImmediateObservationPublisher)
+        guard !publishers.isEmpty else {
+            return Empty<Void, Never>().eraseToAnyPublisher()
+        }
+        return Publishers.MergeMany(publishers).eraseToAnyPublisher()
+    }
+
+    private func sessionGroupingObservationPublisher(
+        renderContext: WorkspaceListRenderContext
+    ) -> AnyPublisher<Void, Never> {
+        let publishers = renderContext.tabs.map(\.sidebarSessionGroupingObservationPublisher)
         guard !publishers.isEmpty else {
             return Empty<Void, Never>().eraseToAnyPublisher()
         }
@@ -12442,10 +12470,6 @@ struct VerticalTabsSidebar: View {
 
     @ViewBuilder
     private func workspaceRows(renderContext: WorkspaceListRenderContext) -> some View {
-        let renderItems = SidebarWorkspaceRenderItem.renderItems(
-            tabs: renderContext.tabs,
-            groupsById: renderContext.workspaceGroupById
-        )
         let shouldCollectWorkspaceDropTargets = SidebarDropPlanner.shouldCollectWorkspaceDropTargets(
             draggedTabId: dragState.draggedTabId,
             isBonsplitWorkspaceDropActive: isBonsplitWorkspaceDropTargetCollectionActive
@@ -12454,22 +12478,21 @@ struct VerticalTabsSidebar: View {
         // drag mutations at 60fps invalidate only the rows/overlays that
         // read them, never this sidebar body. See SidebarDragState and
         // https://github.com/manaflow-ai/cmux/issues/2586.
-        let rows = LazyVStack(spacing: tabRowSpacing) {
-            ForEach(renderItems, id: \.id) { item in
-                switch item {
-                case .groupHeader(let group, let memberWorkspaceIds):
-                    sidebarWorkspaceGroupHeader(
-                        group: group,
-                        memberWorkspaceIds: memberWorkspaceIds,
-                        renderContext: renderContext,
-                        shouldCollectWorkspaceDropTargets: shouldCollectWorkspaceDropTargets
-                    )
-                case .workspace(let tab):
-                    workspaceRow(
-                        tab,
-                        renderContext: renderContext,
-                        shouldCollectWorkspaceDropTargets: shouldCollectWorkspaceDropTargets
-                    )
+        let rows = LazyVStack(spacing: 0) {
+            ForEach(SessionCardSnapshot.Group.allCases, id: \.rawValue) { group in
+                let groupTabs = sessionTabs(in: group, renderContext: renderContext)
+                if !groupTabs.isEmpty {
+                    sessionGroupHeader(group)
+                    if !isSessionGroupCollapsed(group) {
+                        ForEach(groupTabs, id: \.id) { tab in
+                            workspaceRow(
+                                tab,
+                                renderContext: renderContext,
+                                shouldCollectWorkspaceDropTargets: shouldCollectWorkspaceDropTargets
+                            )
+                            .padding(.bottom, tabRowSpacing)
+                        }
+                    }
                 }
             }
         }
@@ -12491,6 +12514,75 @@ struct VerticalTabsSidebar: View {
         .overlay {
             bonsplitWorkspaceDropOverlay()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    private func sessionTabs(
+        in group: SessionCardSnapshot.Group,
+        renderContext: WorkspaceListRenderContext
+    ) -> [Workspace] {
+        renderContext.tabs.filter { workspace in
+            let status = renderContext.sessionStatusByWorkspaceId[workspace.id] ?? .done
+            return SessionCardSnapshot.Group.resolve(status: status, isPinned: workspace.isPinned) == group
+        }
+    }
+
+    private func sessionGroupHeader(_ group: SessionCardSnapshot.Group) -> some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.16)) {
+                toggleSessionGroupCollapsed(group)
+            }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: isSessionGroupCollapsed(group) ? "chevron.right" : "chevron.down")
+                    .font(.system(size: 9, weight: .semibold))
+                    .frame(width: 10, height: 10)
+
+                Text(group.title)
+                    .font(.custom("Inter", size: 10.5).weight(.semibold))
+                    .textCase(.uppercase)
+                    .tracking(0.7)
+
+                Spacer(minLength: 0)
+            }
+            .foregroundColor(Color(hex: "#777782") ?? .secondary)
+            .contentShape(Rectangle())
+            .padding(.horizontal, 17)
+            .padding(.top, 12)
+            .padding(.bottom, 7)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text(group.title))
+        .accessibilityValue(Text(
+            isSessionGroupCollapsed(group)
+                ? String(localized: "sidebar.sessionGroup.collapsed", defaultValue: "Collapsed")
+                : String(localized: "sidebar.sessionGroup.expanded", defaultValue: "Expanded")
+        ))
+    }
+
+    private func isSessionGroupCollapsed(_ group: SessionCardSnapshot.Group) -> Bool {
+        switch group {
+        case .pinned:
+            return pinnedSessionGroupCollapsed
+        case .needsAttention:
+            return needsAttentionSessionGroupCollapsed
+        case .running:
+            return runningSessionGroupCollapsed
+        case .finished:
+            return finishedSessionGroupCollapsed
+        }
+    }
+
+    private func toggleSessionGroupCollapsed(_ group: SessionCardSnapshot.Group) {
+        switch group {
+        case .pinned:
+            pinnedSessionGroupCollapsed.toggle()
+        case .needsAttention:
+            needsAttentionSessionGroupCollapsed.toggle()
+        case .running:
+            runningSessionGroupCollapsed.toggle()
+        case .finished:
+            finishedSessionGroupCollapsed.toggle()
         }
     }
 
@@ -12648,6 +12740,7 @@ struct VerticalTabsSidebar: View {
             dropIndicator: dragState.dropIndicator,
             tabIds: sidebarReorderIds
         )
+        let sessionStatus = renderContext.sessionStatusByWorkspaceId[tab.id] ?? .done
         let onDragStart: () -> NSItemProvider = { [tabId = tab.id] in
             #if DEBUG
             cmuxDebugLog("sidebar.onDrag tab=\(tabId.uuidString.prefix(5))")
@@ -12694,6 +12787,7 @@ struct VerticalTabsSidebar: View {
             dragAutoScrollController: dragAutoScrollController,
             isBeingDragged: isBeingDragged,
             topDropIndicatorVisible: topDropIndicatorVisible,
+            sessionStatus: sessionStatus,
             onDragStart: onDragStart,
             tabDropDelegateFactory: tabDropDelegateFactory,
             contextMenuWorkspaceIds: contextMenuWorkspaceIds,
@@ -12713,7 +12807,6 @@ struct VerticalTabsSidebar: View {
 
         row
             .sidebarWorkspaceFrameAnchor(id: tab.id, isEnabled: shouldCollectWorkspaceDropTargets)
-            .padding(.leading, tab.groupId != nil ? SidebarWorkspaceGroupingMetrics.memberIndent : 0)
     }
 
     private func debugShortSidebarTabId(_ id: UUID?) -> String {
@@ -16417,6 +16510,7 @@ struct TabItemView: View, Equatable {
         lhs.workspaceGroupMenuSnapshot == rhs.workspaceGroupMenuSnapshot &&
         lhs.isBeingDragged == rhs.isBeingDragged &&
         lhs.topDropIndicatorVisible == rhs.topDropIndicatorVisible &&
+        lhs.sessionStatus == rhs.sessionStatus &&
         lhs.settings == rhs.settings
     }
 
@@ -16449,6 +16543,7 @@ struct TabItemView: View, Equatable {
     // unchanged.
     let isBeingDragged: Bool
     let topDropIndicatorVisible: Bool
+    let sessionStatus: SessionCardSnapshot.Status
     let onDragStart: () -> NSItemProvider
     /// Factory invoked from `body` with the row's measured `rowHeight`. Closure
     /// captures the parent's `dragState`, so TabItemView itself never holds an
@@ -16792,33 +16887,11 @@ struct TabItemView: View, Equatable {
             branchName: sessionCardBranchName(from: workspaceSnapshot),
             modelName: sessionCardModelName(from: workspaceSnapshot),
             mode: sessionCardMode(from: workspaceSnapshot),
-            status: sessionCardStatus(from: workspaceSnapshot),
+            status: sessionStatus,
+            isPinned: tab.isPinned,
             diff: sessionCardDiff(from: workspaceSnapshot),
-            badge: sessionCardBadge(from: workspaceSnapshot),
-            statusLabel: sessionCardStatusLabel()
+            badge: sessionCardBadge(from: workspaceSnapshot)
         )
-    }
-
-    private func sessionCardStatusLabel() -> SessionCardSnapshot.StatusLabel? {
-        let preferredKeys: Set<String> = ["workflow", "agent", "wk", "session"]
-        let entry = tab.sidebarStatusEntriesVisibleForDisplay()
-            .filter { preferredKeys.contains($0.key) }
-            .max { lhs, rhs in
-                if lhs.priority != rhs.priority { return lhs.priority < rhs.priority }
-                return lhs.timestamp < rhs.timestamp
-            }
-        guard let entry else { return nil }
-        let rawValue = entry.value
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
-        let withoutStep = rawValue.replacingOccurrences(
-            of: #"^\[?\d+\/\d+\]?\s*"#,
-            with: "",
-            options: .regularExpression
-        )
-        let value = withoutStep.prefix(1).uppercased() + withoutStep.dropFirst()
-        guard !value.isEmpty else { return nil }
-        return SessionCardSnapshot.StatusLabel(value: value, icon: entry.icon, colorHex: entry.color)
     }
 
     private func sessionCardDisplayName(from workspaceSnapshot: SidebarWorkspaceSnapshotBuilder.Snapshot) -> String {
@@ -17011,41 +17084,6 @@ struct TabItemView: View, Equatable {
             }
         }
         return nil
-    }
-
-    private func sessionCardStatus(from workspaceSnapshot: SidebarWorkspaceSnapshotBuilder.Snapshot) -> SessionCardSnapshot.Status {
-        let lifecycleStates = tab.agentLifecycleStatesByPanelId.values.flatMap { $0.values }
-        if lifecycleStates.contains(.running) {
-            return .running
-        }
-        if lifecycleStates.contains(.needsInput) {
-            return .waiting
-        }
-        if let metadataStatus = SessionCardSnapshot.Status(metadataValue: sessionCardMetadataValue(
-            for: [
-                "session.status",
-                "agent.status",
-                "status",
-            ],
-            workspaceSnapshot: workspaceSnapshot
-        )) {
-            return metadataStatus
-        }
-        switch tab.remoteConnectionState {
-        case .connecting, .reconnecting:
-            return .running
-        case .connected:
-            return .connected
-        case .disconnected, .error:
-            break
-        }
-        if lifecycleStates.contains(.idle) ||
-            !tab.agentPIDPanelIdsByKey.isEmpty ||
-            !tab.restoredAgentSnapshotsByPanelId.isEmpty ||
-            tab.hasActiveRemoteTerminalSessions {
-            return .connected
-        }
-        return .idle
     }
 
     private func sessionCardDiff(from workspaceSnapshot: SidebarWorkspaceSnapshotBuilder.Snapshot) -> SessionCardSnapshot.Diff {

@@ -120,22 +120,7 @@ struct SessionCard: View {
 
             Spacer(minLength: 0)
 
-            if let statusLabel = snapshot.statusLabel {
-                HStack(spacing: 4) {
-                    if let icon = statusLabel.icon, !icon.isEmpty {
-                        Image(systemName: icon)
-                            .font(.system(size: scaled(9), weight: .semibold))
-                    }
-                    Text(statusLabel.value)
-                        .lineLimit(1)
-                }
-                .font(.custom("Inter", size: scaled(10)).weight(.semibold))
-                .foregroundColor(statusLabelColor(statusLabel))
-                .padding(.horizontal, 7)
-                .padding(.vertical, 2)
-                .background(Capsule(style: .continuous).fill(statusLabelColor(statusLabel).opacity(0.14)))
-                .overlay(Capsule(style: .continuous).strokeBorder(statusLabelColor(statusLabel).opacity(0.3), lineWidth: 0.5))
-            }
+            statusPill
 
             if !snapshot.diff.isEmpty {
                 HStack(spacing: 5) {
@@ -203,8 +188,29 @@ struct SessionCard: View {
         }
     }
 
-    private func statusLabelColor(_ label: SessionCardSnapshot.StatusLabel) -> Color {
-        SessionCardColor.color(hex: label.colorHex ?? "#78BBFF", fallbackHex: "#78BBFF")
+    private var statusPill: some View {
+        let color = snapshot.isPinned
+            ? hexColor("#8A8A95")
+            : SessionCardColor.color(hex: snapshot.status.colorHex, fallbackHex: "#8A8A95")
+        let label = snapshot.isPinned
+            ? String(localized: "sidebar.sessionCard.status.pinned", defaultValue: "Pinned")
+            : snapshot.status.displayName
+        let iconName = snapshot.isPinned ? "pin" : snapshot.status.iconName
+
+        return HStack(spacing: 4) {
+            if let iconName {
+                Image(systemName: iconName)
+                    .font(.system(size: scaled(9), weight: .semibold))
+            }
+            Text(label)
+                .lineLimit(1)
+        }
+        .font(.custom("Inter", size: scaled(10)).weight(.semibold))
+        .foregroundColor(color)
+        .padding(.horizontal, 7)
+        .padding(.vertical, 2)
+        .background(Capsule(style: .continuous).fill(color.opacity(0.14)))
+        .overlay(Capsule(style: .continuous).strokeBorder(color.opacity(0.3), lineWidth: 0.5))
     }
 
     private func scaled(_ size: CGFloat) -> CGFloat {
