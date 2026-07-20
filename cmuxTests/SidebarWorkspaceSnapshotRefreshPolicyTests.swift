@@ -155,11 +155,132 @@ final class SessionCardSnapshotTests: XCTestCase {
     }
 
     func testStatusParsingRecognizesAgentLifecycleWords() {
-        XCTAssertEqual(SessionCardSnapshot.Status(metadataValue: "working"), .running)
-        XCTAssertEqual(SessionCardSnapshot.Status(metadataValue: "needs_input"), .waiting)
-        XCTAssertEqual(SessionCardSnapshot.Status(metadataValue: "ready"), .connected)
-        XCTAssertEqual(SessionCardSnapshot.Status(metadataValue: "offline"), .idle)
+        XCTAssertEqual(SessionCardSnapshot.Status(metadataValue: "working"), .working)
+        XCTAssertEqual(SessionCardSnapshot.Status(metadataValue: "needs_input"), .needsInput)
+        XCTAssertEqual(SessionCardSnapshot.Status(metadataValue: "ready"), .ready)
+        XCTAssertEqual(SessionCardSnapshot.Status(metadataValue: "idle"), .ready)
+        XCTAssertEqual(SessionCardSnapshot.Status(metadataValue: "connected"), .ready)
+        XCTAssertEqual(SessionCardSnapshot.Status(metadataValue: "done"), .done)
+        XCTAssertEqual(SessionCardSnapshot.Status(metadataValue: "offline"), .exited)
         XCTAssertNil(SessionCardSnapshot.Status(metadataValue: "unknown-status"))
+    }
+
+    func testStatusParsingUsesAgentStatusIconsForLocalizedValues() {
+        let entry = SidebarStatusEntry(
+            key: "codex",
+            value: "Codex が入力を必要としています",
+            icon: "bell.fill"
+        )
+
+        XCTAssertEqual(SessionCardSnapshot.Status(sidebarEntry: entry), .needsInput)
+    }
+
+    func testStatusParsingKeepsPlainCheckmarkCompletionInFinishedState() {
+        let entry = SidebarStatusEntry(
+            key: "session",
+            value: "Done",
+            icon: "checkmark"
+        )
+
+        let status = SessionCardSnapshot.Status(sidebarEntry: entry)
+        XCTAssertEqual(status, .done)
+        XCTAssertEqual(SessionCardSnapshot.Group.resolve(status: .done, isPinned: false), .finished)
+    }
+
+    func testStatusGroupMappingUsesPinnedOverrideAndCanonicalStatus() {
+        XCTAssertEqual(SessionCardSnapshot.Group.resolve(status: .working, isPinned: true), .pinned)
+        XCTAssertEqual(SessionCardSnapshot.Group.resolve(status: .ready, isPinned: false), .needsAttention)
+        XCTAssertEqual(SessionCardSnapshot.Group.resolve(status: .needsInput, isPinned: false), .needsAttention)
+        XCTAssertEqual(SessionCardSnapshot.Group.resolve(status: .working, isPinned: false), .running)
+        XCTAssertEqual(SessionCardSnapshot.Group.resolve(status: .done, isPinned: false), .finished)
+        XCTAssertEqual(SessionCardSnapshot.Group.resolve(status: .exited, isPinned: false), .finished)
+    }
+
+    func testStatusGroupsHaveRequiredDisplayOrder() {
+        XCTAssertEqual(SessionCardSnapshot.Group.allCases, [.pinned, .needsAttention, .running, .finished])
+    }
+
+    @MainActor
+    func testStatusResolverUsesReadyMetadataAndNeedsInputPrecedence() throws {
+        let manager = TabManager()
+        let workspace = try XCTUnwrap(manager.tabs.first)
+        let panelId = try XCTUnwrap(workspace.focusedPanelId)
+        workspace.statusEntries["agent"] = SidebarStatusEntry(key: "agent", value: "Ready")
+
+        XCTAssertEqual(SessionCardSnapshot.Status.resolve(workspace: workspace), .ready)
+
+        workspace.setAgentLifecycle(key: "codex", panelId: panelId, lifecycle: .running)
+        workspace.setAgentLifecycle(key: "claude_code", panelId: panelId, lifecycle: .needsInput)
+
+        XCTAssertEqual(SessionCardSnapshot.Status.resolve(workspace: workspace), .needsInput)
+
+        XCTAssertTrue(workspace.clearAgentLifecycle(key: "claude_code", panelId: panelId))
+        XCTAssertEqual(SessionCardSnapshot.Status.resolve(workspace: workspace), .working)
+    }
+
+    @MainActor
+    func testStatusResolverTreatsUnclassifiedIdleWorkspaceAsDone() throws {
+        let manager = TabManager()
+        let workspace = try XCTUnwrap(manager.tabs.first)
+
+        XCTAssertEqual(SessionCardSnapshot.Status.resolve(workspace: workspace), .done)
+    }
+
+    @MainActor
+    func testStatusResolverTracksAgentLifecycleUntilItFinishes() throws {
+        let manager = TabManager()
+        let workspace = try XCTUnwrap(manager.tabs.first)
+        let panelId = try XCTUnwrap(workspace.focusedPanelId)
+
+        workspace.setAgentLifecycle(key: "codex", panelId: panelId, lifecycle: .idle)
+        XCTAssertEqual(SessionCardSnapshot.Status.resolve(workspace: workspace), .ready)
+
+        workspace.setAgentLifecycle(key: "codex", panelId: panelId, lifecycle: .running)
+        XCTAssertEqual(SessionCardSnapshot.Status.resolve(workspace: workspace), .working)
+
+        workspace.setAgentLifecycle(key: "codex", panelId: panelId, lifecycle: .needsInput)
+        XCTAssertEqual(SessionCardSnapshot.Status.resolve(workspace: workspace), .needsInput)
+
+        XCTAssertTrue(workspace.clearAgentLifecycle(key: "codex", panelId: panelId))
+        XCTAssertEqual(SessionCardSnapshot.Status.resolve(workspace: workspace), .done)
+    }
+
+    @MainActor
+    func testStatusResolverKeepsPersistentRemoteSessionLiveAcrossTransportExit() throws {
+        let manager = TabManager()
+        let workspace = try XCTUnwrap(manager.tabs.first)
+        let panelId = try XCTUnwrap(workspace.focusedPanelId)
+        workspace.configureRemoteConnection(
+            WorkspaceRemoteConfiguration(
+                destination: "devbox",
+                port: nil,
+                identityFile: nil,
+                sshOptions: [],
+                localProxyPort: nil,
+                relayPort: nil,
+                relayID: nil,
+                relayToken: nil,
+                localSocketPath: nil,
+                terminalStartupCommand: "ssh -tt devbox",
+                preserveAfterTerminalExit: true
+            ),
+            autoConnect: false
+        )
+
+        XCTAssertEqual(workspace.remoteConnectionState, .disconnected)
+        XCTAssertTrue(workspace.hasActiveRemoteTerminalSessions)
+        XCTAssertEqual(SessionCardSnapshot.Status.resolve(workspace: workspace), .ready)
+
+        workspace.statusEntries["session"] = SidebarStatusEntry(
+            key: "session",
+            value: "Working",
+            icon: "bolt.fill"
+        )
+        XCTAssertEqual(SessionCardSnapshot.Status.resolve(workspace: workspace), .working)
+
+        workspace.statusEntries.removeValue(forKey: "session")
+        workspace.untrackRemoteTerminalSurface(panelId)
+        XCTAssertEqual(SessionCardSnapshot.Status.resolve(workspace: workspace), .exited)
     }
 
     func testDiffParsingNormalizesSignedCounts() {
@@ -188,7 +309,7 @@ final class SessionCardSnapshotTests: XCTestCase {
             branchName: "main",
             modelName: "gpt-5",
             mode: .plan,
-            status: .running,
+            status: .working,
             diff: SessionCardSnapshot.Diff(added: 1, deleted: 2),
             badge: .unindexedHost(.devbox)
         )
@@ -214,7 +335,7 @@ final class SessionCardSnapshotTests: XCTestCase {
             branchName: "main",
             modelName: "gpt-5",
             mode: .plan,
-            status: .running,
+            status: .working,
             diff: SessionCardSnapshot.Diff(added: 1, deleted: 2)
         )
     }

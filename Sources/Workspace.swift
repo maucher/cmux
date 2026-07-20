@@ -10671,6 +10671,18 @@ final class Workspace: Identifiable, ObservableObject {
         return Publishers.MergeMany(publishers).eraseToAnyPublisher()
     }()
 
+    lazy var sidebarSessionGroupingObservationPublisher: AnyPublisher<Void, Never> = {
+        let publishers: [AnyPublisher<Void, Never>] = [
+            sidebarObservationSignal($isPinned),
+            sidebarObservationSignal($statusEntries),
+            sidebarObservationSignal($remoteConfiguration),
+            sidebarObservationSignal($remoteConnectionState),
+            sidebarObservationSignal($sidebarAgentLifecycleRevision),
+        ]
+
+        return Publishers.MergeMany(publishers).eraseToAnyPublisher()
+    }()
+
     private func scheduleExtensionSidebarProjectRootRefresh(for directory: String) {
         extensionSidebarProjectRootRefreshID &+= 1
         let refreshID = extensionSidebarProjectRootRefreshID

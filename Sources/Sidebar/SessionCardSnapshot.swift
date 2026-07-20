@@ -1,6 +1,40 @@
 import Foundation
 
 struct SessionCardSnapshot: Equatable {
+    enum Group: Int, CaseIterable, Equatable {
+        case pinned
+        case needsAttention
+        case running
+        case finished
+
+        static func resolve(status: Status, isPinned: Bool) -> Group {
+            if isPinned {
+                return .pinned
+            }
+            switch status {
+            case .ready, .needsInput:
+                return .needsAttention
+            case .working:
+                return .running
+            case .done, .exited:
+                return .finished
+            }
+        }
+
+        var title: String {
+            switch self {
+            case .pinned:
+                return String(localized: "sidebar.sessionGroup.pinned", defaultValue: "Pinned")
+            case .needsAttention:
+                return String(localized: "sidebar.sessionGroup.needsAttention", defaultValue: "Needs Attention")
+            case .running:
+                return String(localized: "sidebar.sessionGroup.running", defaultValue: "Running")
+            case .finished:
+                return String(localized: "sidebar.sessionGroup.finished", defaultValue: "Finished")
+            }
+        }
+    }
+
     enum Host: Equatable {
         case laptop
         case devbox
@@ -52,11 +86,12 @@ struct SessionCardSnapshot: Equatable {
         }
     }
 
-    enum Status: Equatable {
-        case connected
-        case running
-        case waiting
-        case idle
+    enum Status: String, Equatable {
+        case ready
+        case needsInput
+        case working
+        case done
+        case exited
 
         init?(metadataValue: String?) {
             let normalized = metadataValue?
@@ -65,30 +100,129 @@ struct SessionCardSnapshot: Equatable {
                 .replacingOccurrences(of: "_", with: "-")
                 ?? ""
             switch normalized {
-            case "connected", "online", "ready":
-                self = .connected
+            case "connected", "online", "ready", "idle", "review-ready", "ready-for-review":
+                self = .ready
             case "running", "working", "busy", "in-progress", "processing":
-                self = .running
+                self = .working
             case "waiting", "needs-input", "needsinput", "blocked", "paused":
-                self = .waiting
-            case "idle", "disconnected", "offline":
-                self = .idle
+                self = .needsInput
+            case "done", "completed", "complete", "finished", "success", "succeeded":
+                self = .done
+            case "exited", "disconnected", "offline", "failed", "error":
+                self = .exited
             default:
                 return nil
             }
         }
 
-        var accessibilityLabel: String {
-            switch self {
-            case .connected:
-                return String(localized: "sidebar.sessionCard.status.connected", defaultValue: "Connected")
-            case .running:
-                return String(localized: "sidebar.sessionCard.status.running", defaultValue: "Running")
-            case .waiting:
-                return String(localized: "sidebar.sessionCard.status.waiting", defaultValue: "Waiting")
-            case .idle:
-                return String(localized: "sidebar.sessionCard.status.idle", defaultValue: "Idle")
+        init?(sidebarEntry: SidebarStatusEntry) {
+            switch sidebarEntry.icon {
+            case "bolt.fill":
+                self = .working
+            case "bell.fill", "exclamationmark.circle", "exclamationmark.triangle.fill":
+                self = .needsInput
+            case "pause.circle.fill", "checkmark.circle", "checkmark.circle.fill":
+                self = .ready
+            case "xmark.circle", "xmark.circle.fill":
+                self = .exited
+            default:
+                self.init(metadataValue: sidebarEntry.value)
             }
+        }
+
+        var displayName: String {
+            switch self {
+            case .ready:
+                return String(localized: "sidebar.sessionCard.status.ready", defaultValue: "Ready")
+            case .needsInput:
+                return String(localized: "sidebar.sessionCard.status.needsInput", defaultValue: "Needs input")
+            case .working:
+                return String(localized: "sidebar.sessionCard.status.working", defaultValue: "Working")
+            case .done:
+                return String(localized: "sidebar.sessionCard.status.done", defaultValue: "Done")
+            case .exited:
+                return String(localized: "sidebar.sessionCard.status.exited", defaultValue: "Exited")
+            }
+        }
+
+        var iconName: String? {
+            switch self {
+            case .ready:
+                return "checkmark.circle"
+            case .needsInput:
+                return "exclamationmark.circle"
+            case .working:
+                return "bolt.fill"
+            case .done:
+                return "checkmark"
+            case .exited:
+                return nil
+            }
+        }
+
+        var colorHex: String {
+            switch self {
+            case .ready:
+                return "#3FB950"
+            case .needsInput:
+                return "#E3B341"
+            case .working:
+                return "#58A6FF"
+            case .done:
+                return "#8A8A95"
+            case .exited:
+                return "#6E6E78"
+            }
+        }
+
+        @MainActor
+        static func resolve(workspace: Workspace) -> Status {
+            let lifecycleStates = workspace.agentLifecycleStatesByPanelId.values.flatMap { $0.values }
+            let metadataStatuses = recognizedMetadataStatuses(in: workspace)
+
+            if lifecycleStates.contains(.needsInput) || metadataStatuses.contains(.needsInput) {
+                return .needsInput
+            }
+            if lifecycleStates.contains(.running) ||
+                metadataStatuses.contains(.working) ||
+                workspace.remoteConnectionState == .connecting ||
+                workspace.remoteConnectionState == .reconnecting {
+                return .working
+            }
+            if workspace.isRemoteWorkspace,
+               !workspace.hasActiveRemoteTerminalSessions,
+               (workspace.remoteConnectionState == .disconnected || workspace.remoteConnectionState == .error) {
+                return .exited
+            }
+            if metadataStatuses.contains(.ready) {
+                return .ready
+            }
+            if metadataStatuses.contains(.exited) {
+                return .exited
+            }
+            if lifecycleStates.contains(.idle) ||
+                !workspace.agentPIDPanelIdsByKey.isEmpty ||
+                !workspace.restoredAgentSnapshotsByPanelId.isEmpty ||
+                workspace.hasActiveRemoteTerminalSessions {
+                return .ready
+            }
+            return .done
+        }
+
+        @MainActor
+        private static func recognizedMetadataStatuses(in workspace: Workspace) -> [Status] {
+            let explicitKeys = ["session.status", "agent.status", "status"]
+            let values = explicitKeys.compactMap { workspace.statusEntries[$0]?.value }
+            let preferredKeys = Set(["workflow", "agent", "wk", "session"])
+                .union(AgentHibernationLifecycleStatusKeys.allowedStatusKeys)
+            let inferredStatuses = workspace.sidebarStatusEntriesVisibleForDisplay()
+                .filter { preferredKeys.contains($0.key) }
+                .sorted { lhs, rhs in
+                    if lhs.priority != rhs.priority { return lhs.priority > rhs.priority }
+                    return lhs.timestamp > rhs.timestamp
+                }
+                .compactMap(Status.init(sidebarEntry:))
+            return values.compactMap(Status.init(metadataValue:)) + inferredStatuses
         }
     }
 
@@ -117,12 +251,6 @@ struct SessionCardSnapshot: Equatable {
         }
     }
 
-    struct StatusLabel: Equatable {
-        let value: String
-        let icon: String?
-        let colorHex: String?
-    }
-
     let workspaceNumber: Int
     let badge: Badge
     let name: String
@@ -132,7 +260,7 @@ struct SessionCardSnapshot: Equatable {
     let modelName: String?
     let mode: Mode
     let status: Status
-    let statusLabel: StatusLabel?
+    let isPinned: Bool
     let diff: Diff
 
     init(
@@ -144,9 +272,9 @@ struct SessionCardSnapshot: Equatable {
         modelName: String?,
         mode: Mode,
         status: Status,
+        isPinned: Bool = false,
         diff: Diff,
-        badge: Badge? = nil,
-        statusLabel: StatusLabel? = nil
+        badge: Badge? = nil
     ) {
         self.workspaceNumber = min(10, max(1, workspaceNumber))
         self.badge = badge ?? .indexedWorktree(self.workspaceNumber)
@@ -157,7 +285,7 @@ struct SessionCardSnapshot: Equatable {
         self.modelName = Self.nonEmpty(modelName)
         self.mode = mode
         self.status = status
-        self.statusLabel = statusLabel
+        self.isPinned = isPinned
         self.diff = diff
     }
 
