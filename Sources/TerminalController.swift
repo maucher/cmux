@@ -9829,6 +9829,25 @@ class TerminalController {
 
     // MARK: - V2 Sidebar Methods
 
+    /// Status entries live on Workspace (row-level views observe the workspace
+    /// directly), but the session-card *grouping* is derived by ContentView from
+    /// the TabManager environment object, so it needs a TabManager-level nudge.
+    /// Hook scripts publish status changes in bursts (clear+clear+set per
+    /// lifecycle transition); a synchronous objectWillChange per RPC re-renders
+    /// the whole sidebar each time and makes typing lag under agent traffic, so
+    /// coalesce the nudges into one refresh per burst window.
+    private var pendingSessionCardGroupingRefreshes: Set<ObjectIdentifier> = []
+
+    private func scheduleSessionCardGroupingRefresh(_ tabManager: TabManager) {
+        let key = ObjectIdentifier(tabManager)
+        guard !pendingSessionCardGroupingRefreshes.contains(key) else { return }
+        pendingSessionCardGroupingRefreshes.insert(key)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self, weak tabManager] in
+            self?.pendingSessionCardGroupingRefreshes.remove(key)
+            tabManager?.objectWillChange.send()
+        }
+    }
+
     private func v2SidebarSetStatus(params: [String: Any]) -> V2CallResult {
         guard let tabManager = v2ResolveTabManager(params: params) else {
             return .err(code: "unavailable", message: "TabManager not available", data: nil)
@@ -9865,6 +9884,7 @@ class TerminalController {
                 key: key, value: value, icon: iconOpt, color: colorOpt,
                 url: nil, priority: priority, format: .plain, timestamp: Date()
             )
+            scheduleSessionCardGroupingRefresh(tabManager)
         }
         return result
     }
@@ -9884,6 +9904,9 @@ class TerminalController {
                 return
             }
             let cleared = ws.statusEntries.removeValue(forKey: key) != nil
+            if cleared {
+                scheduleSessionCardGroupingRefresh(tabManager)
+            }
             result = .ok(["key": key, "cleared": cleared])
         }
         return result

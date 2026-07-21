@@ -4664,17 +4664,26 @@ class GhosttyApp {
             }
             return true
         case GHOSTTY_ACTION_SET_TITLE:
-            let title = action.action.set_title.title
+            let rawTitle = action.action.set_title.title
                 .flatMap { String(cString: $0) } ?? ""
-            if let tabId = surfaceView.tabId,
-               let surfaceId = surfaceView.terminalSurface?.id {
-                DispatchQueue.main.async {
+            guard let tabId = surfaceView.tabId,
+                  let sourceSurface = surfaceView.terminalSurface else { return true }
+            // Preserve title arrival order while moving normalization and the UI
+            // notification onto the main actor. The view can be reused before
+            // this deferred block runs, so keep the source surface identity.
+            DispatchQueue.main.async { [weak surfaceView] in
+                MainActor.assumeIsolated {
+                    guard let surfaceView,
+                          let title = surfaceView.titleToDispatch(
+                            for: rawTitle,
+                            surfaceID: sourceSurface.id
+                          ) else { return }
                     NotificationCenter.default.post(
                         name: .ghosttyDidSetTitle,
                         object: surfaceView,
                         userInfo: [
                             GhosttyNotificationKey.tabId: tabId,
-                            GhosttyNotificationKey.surfaceId: surfaceId,
+                            GhosttyNotificationKey.surfaceId: sourceSurface.id,
                             GhosttyNotificationKey.title: title,
                         ]
                     )
@@ -8204,6 +8213,12 @@ extension TerminalSurface {
 // MARK: - Ghostty Surface View
 
 class GhosttyNSView: NSView, NSUserInterfaceValidations {
+    private var titleChurnFilter = TerminalTitleChurnFilter()
+
+    fileprivate func titleToDispatch(for rawTitle: String, surfaceID: UUID) -> String? {
+        titleChurnFilter.titleToDispatch(for: rawTitle, surfaceID: surfaceID)
+    }
+
     private static let focusDebugEnabled: Bool = {
         if ProcessInfo.processInfo.environment["CMUX_FOCUS_DEBUG"] == "1" {
             return true
