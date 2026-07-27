@@ -1,5 +1,20 @@
 import Foundation
 
+@MainActor
+struct SidebarSessionRowSnapshot: Identifiable {
+    let id: UUID
+    let workspace: Workspace
+    let status: SessionCardSnapshot.Status
+    let group: SessionCardSnapshot.Group
+
+    init(workspace: Workspace, status: SessionCardSnapshot.Status) {
+        id = workspace.id
+        self.workspace = workspace
+        self.status = status
+        group = SessionCardSnapshot.Group.resolve(status: status, isPinned: workspace.isPinned)
+    }
+}
+
 struct SessionCardSnapshot: Equatable {
     enum Group: Int, CaseIterable, Equatable {
         case pinned
@@ -12,11 +27,11 @@ struct SessionCardSnapshot: Equatable {
                 return .pinned
             }
             switch status {
-            case .ready, .needsInput:
+            case .needsInput:
                 return .needsAttention
             case .working:
                 return .running
-            case .done, .exited:
+            case .ready, .done, .exited:
                 return .finished
             }
         }

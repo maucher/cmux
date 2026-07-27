@@ -87,6 +87,22 @@ final class SidebarWorkspaceSnapshotRefreshPolicyTests: XCTestCase {
         XCTAssertFalse(decision.hasDeferredWorkspaceObservationInvalidation)
     }
 
+    func testStatusOnlyChangeRefreshesSnapshot() {
+        let current = Self.snapshot(sessionStatus: .done)
+        let next = Self.snapshot(sessionStatus: .working)
+
+        let decision = SidebarWorkspaceSnapshotRefreshPolicy.decision(
+            current: current,
+            next: next,
+            force: false,
+            contextMenuVisible: false
+        )
+
+        XCTAssertEqual(decision.workspaceSnapshotStorage?.sessionStatus, .working)
+        XCTAssertNil(decision.pendingWorkspaceSnapshot)
+        XCTAssertFalse(decision.hasDeferredWorkspaceObservationInvalidation)
+    }
+
     private static func snapshot(
         presentationKey: SidebarWorkspaceSnapshotBuilder.PresentationKey? = nil,
         title: String = "workspace",
@@ -95,6 +111,7 @@ final class SidebarWorkspaceSnapshotRefreshPolicyTests: XCTestCase {
         customColorHex: String? = nil,
         remoteConnectionStatusText: String = "Disconnected",
         latestConversationMessage: String? = nil,
+        sessionStatus: SessionCardSnapshot.Status = .done,
         listeningPorts: [Int] = []
     ) -> SidebarWorkspaceSnapshotBuilder.Snapshot {
         SidebarWorkspaceSnapshotBuilder.Snapshot(
@@ -118,6 +135,7 @@ final class SidebarWorkspaceSnapshotRefreshPolicyTests: XCTestCase {
             branchDirectoryLines: [],
             branchLinesContainBranch: false,
             pullRequestRows: [],
+            sessionStatus: sessionStatus,
             listeningPorts: listeningPorts
         )
     }
