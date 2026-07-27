@@ -12,6 +12,21 @@ import Testing
 @MainActor
 struct SidebarStatusRPCRefreshTests {
     @Test
+    func sessionRowSnapshotKeepsIdentityWhileStatusChanges() throws {
+        let manager = TabManager()
+        let workspace = try #require(manager.selectedWorkspace)
+
+        let finished = SidebarSessionRowSnapshot(workspace: workspace, status: .done)
+        let running = SidebarSessionRowSnapshot(workspace: workspace, status: .working)
+
+        #expect(finished.id == running.id)
+        #expect(finished.status == .done)
+        #expect(running.status == .working)
+        #expect(finished.group == .finished)
+        #expect(running.group == .running)
+    }
+
+    @Test
     func setAndClearStatusInvalidateSessionCards() async throws {
         let controller = TerminalController.shared
         let previousManager = controller.activeTabManagerForCallerNotification()

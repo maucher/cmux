@@ -11020,7 +11020,10 @@ struct VerticalTabsSidebar: View {
         let workspaceGroups: [WorkspaceGroup]
         let workspaceGroupById: [UUID: WorkspaceGroup]
         let workspaceGroupMenuSnapshot: WorkspaceGroupMenuSnapshot
-        let sessionStatusByWorkspaceId: [UUID: SessionCardSnapshot.Status]
+        let sessionRows: [SidebarSessionRowSnapshot]
+        /// Workspace ids in the exact top-to-bottom order the sidebar renders
+        /// them right now (collapsed status-group rows excluded).
+        let visibleOrderedWorkspaceIds: [UUID]
 
         var workspaceIds: [UUID] { tabIds }
     }
@@ -11051,9 +11054,17 @@ struct VerticalTabsSidebar: View {
         let workspaceGroupMenuSnapshot = WorkspaceGroupMenuSnapshot(
             items: workspaceGroups.map { WorkspaceGroupMenuSnapshot.Item(id: $0.id, name: $0.name) }
         )
-        let sessionStatusByWorkspaceId = Dictionary(uniqueKeysWithValues: tabs.map {
-            ($0.id, SessionCardSnapshot.Status.resolve(workspace: $0))
-        })
+        let sessionRows = tabs.map {
+            let status = SessionCardSnapshot.Status.resolve(workspace: $0)
+            return SidebarSessionRowSnapshot(workspace: $0, status: status)
+        }
+        // Mirrors the row order rendered in `workspaceRows(renderContext:)`:
+        // walk status groups in display order, skipping collapsed ones, so
+        // keyboard cycling (⌘⌃[ / ⌘⌃]) matches what's actually on screen.
+        let visibleOrderedWorkspaceIds = SessionCardSnapshot.Group.allCases.flatMap { group -> [UUID] in
+            guard !isSessionGroupCollapsed(group) else { return [] }
+            return sessionRows.filter { $0.group == group }.map(\.id)
+        }
         let draggedSidebarTabId = dragState.draggedTabId
         let sidebarReorderIds = draggedSidebarTabId.map {
             tabManager.sidebarReorderWorkspaceIds(
@@ -11078,7 +11089,8 @@ struct VerticalTabsSidebar: View {
             workspaceGroups: workspaceGroups,
             workspaceGroupById: workspaceGroupById,
             workspaceGroupMenuSnapshot: workspaceGroupMenuSnapshot,
-            sessionStatusByWorkspaceId: sessionStatusByWorkspaceId
+            sessionRows: sessionRows,
+            visibleOrderedWorkspaceIds: visibleOrderedWorkspaceIds
         )
 
         ZStack(alignment: .bottomLeading) {
@@ -11273,9 +11285,13 @@ struct VerticalTabsSidebar: View {
                 .modifier(ClearScrollBackground())
                 .onAppear {
                     requestSelectedWorkspaceScroll(scrollProxy, workspaceIds: renderContext.workspaceIds)
+                    tabManager.updateSidebarVisibleOrder(renderContext.visibleOrderedWorkspaceIds)
                 }
                 .onChange(of: tabManager.selectedTabId) { _, _ in
                     requestSelectedWorkspaceScroll(scrollProxy, workspaceIds: renderContext.workspaceIds)
+                }
+                .onChange(of: renderContext.visibleOrderedWorkspaceIds) { _, newValue in
+                    tabManager.updateSidebarVisibleOrder(newValue)
                 }
                 .onChange(of: renderContext.workspaceIds) { oldWorkspaceIds, newWorkspaceIds in
                     guard shouldRequestSelectedWorkspaceScrollAfterWorkspaceIdsChange(
@@ -12480,13 +12496,13 @@ struct VerticalTabsSidebar: View {
         // https://github.com/manaflow-ai/cmux/issues/2586.
         let rows = LazyVStack(spacing: 0) {
             ForEach(SessionCardSnapshot.Group.allCases, id: \.rawValue) { group in
-                let groupTabs = sessionTabs(in: group, renderContext: renderContext)
-                if !groupTabs.isEmpty {
+                let groupRows = renderContext.sessionRows.filter { $0.group == group }
+                if !groupRows.isEmpty {
                     sessionGroupHeader(group)
                     if !isSessionGroupCollapsed(group) {
-                        ForEach(groupTabs, id: \.id) { tab in
+                        ForEach(groupRows) { sessionRow in
                             workspaceRow(
-                                tab,
+                                sessionRow.workspace,
                                 renderContext: renderContext,
                                 shouldCollectWorkspaceDropTargets: shouldCollectWorkspaceDropTargets
                             )
@@ -12514,16 +12530,6 @@ struct VerticalTabsSidebar: View {
         .overlay {
             bonsplitWorkspaceDropOverlay()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
-    }
-
-    private func sessionTabs(
-        in group: SessionCardSnapshot.Group,
-        renderContext: WorkspaceListRenderContext
-    ) -> [Workspace] {
-        renderContext.tabs.filter { workspace in
-            let status = renderContext.sessionStatusByWorkspaceId[workspace.id] ?? .done
-            return SessionCardSnapshot.Group.resolve(status: status, isPinned: workspace.isPinned) == group
         }
     }
 
@@ -12740,7 +12746,6 @@ struct VerticalTabsSidebar: View {
             dropIndicator: dragState.dropIndicator,
             tabIds: sidebarReorderIds
         )
-        let sessionStatus = renderContext.sessionStatusByWorkspaceId[tab.id] ?? .done
         let onDragStart: () -> NSItemProvider = { [tabId = tab.id] in
             #if DEBUG
             cmuxDebugLog("sidebar.onDrag tab=\(tabId.uuidString.prefix(5))")
@@ -12787,7 +12792,6 @@ struct VerticalTabsSidebar: View {
             dragAutoScrollController: dragAutoScrollController,
             isBeingDragged: isBeingDragged,
             topDropIndicatorVisible: topDropIndicatorVisible,
-            sessionStatus: sessionStatus,
             onDragStart: onDragStart,
             tabDropDelegateFactory: tabDropDelegateFactory,
             contextMenuWorkspaceIds: contextMenuWorkspaceIds,
@@ -16474,6 +16478,7 @@ struct SidebarWorkspaceSnapshotBuilder {
         let branchDirectoryLines: [VerticalBranchDirectoryLine]
         let branchLinesContainBranch: Bool
         let pullRequestRows: [PullRequestDisplay]
+        let sessionStatus: SessionCardSnapshot.Status
         let listeningPorts: [Int]
 
     }
@@ -16510,7 +16515,6 @@ struct TabItemView: View, Equatable {
         lhs.workspaceGroupMenuSnapshot == rhs.workspaceGroupMenuSnapshot &&
         lhs.isBeingDragged == rhs.isBeingDragged &&
         lhs.topDropIndicatorVisible == rhs.topDropIndicatorVisible &&
-        lhs.sessionStatus == rhs.sessionStatus &&
         lhs.settings == rhs.settings
     }
 
@@ -16543,7 +16547,6 @@ struct TabItemView: View, Equatable {
     // unchanged.
     let isBeingDragged: Bool
     let topDropIndicatorVisible: Bool
-    let sessionStatus: SessionCardSnapshot.Status
     let onDragStart: () -> NSItemProvider
     /// Factory invoked from `body` with the row's measured `rowHeight`. Closure
     /// captures the parent's `dragState`, so TabItemView itself never holds an
@@ -16887,7 +16890,7 @@ struct TabItemView: View, Equatable {
             branchName: sessionCardBranchName(from: workspaceSnapshot),
             modelName: sessionCardModelName(from: workspaceSnapshot),
             mode: sessionCardMode(from: workspaceSnapshot),
-            status: sessionStatus,
+            status: workspaceSnapshot.sessionStatus,
             isPinned: tab.isPinned,
             diff: sessionCardDiff(from: workspaceSnapshot),
             badge: sessionCardBadge(from: workspaceSnapshot)
@@ -17935,6 +17938,7 @@ struct TabItemView: View, Equatable {
             branchDirectoryLines: branchDirectoryLines,
             branchLinesContainBranch: branchLinesContainBranch,
             pullRequestRows: pullRequestRows,
+            sessionStatus: SessionCardSnapshot.Status.resolve(workspace: tab),
             listeningPorts: detailVisibility.showsPorts ? tab.listeningPorts : []
         )
     }

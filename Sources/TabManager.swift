@@ -1068,6 +1068,18 @@ class TabManager: ObservableObject {
     weak var window: NSWindow?
 
     @Published var tabs: [Workspace] = []
+    /// Workspace ids in the exact top-to-bottom order the sidebar currently
+    /// renders them (status groups, collapsed-group rows excluded). Kept in
+    /// sync by the sidebar view; used so keyboard cycling matches what's
+    /// actually on screen instead of `tabs`' storage order.
+    private var sidebarVisibleOrder: [UUID] = []
+
+    /// Called by the sidebar view whenever its rendered row order changes.
+    func updateSidebarVisibleOrder(_ workspaceIds: [UUID]) {
+        guard sidebarVisibleOrder != workspaceIds else { return }
+        sidebarVisibleOrder = workspaceIds
+    }
+
     /// Named groupings of workspaces shown as collapsible sections in the sidebar.
     /// Group order in this array defines section order in the sidebar.
     /// Each member workspace stores its `groupId` on the `Workspace` model.
@@ -6786,40 +6798,49 @@ class TabManager: ObservableObject {
         return workspace.panelIdFromSurfaceId(TabID(uuid: surfaceOrPanelId))
     }
 
+    /// The workspace ids to cycle through for next/prev tab, in order. Uses
+    /// the sidebar's visible row order when available (so cycling matches
+    /// what's on screen, including custom groups and collapsed sections);
+    /// falls back to `tabs` if the sidebar hasn't reported an order yet.
+    private var cyclableWorkspaceIds: [UUID] {
+        let visible = sidebarVisibleOrder.filter { id in tabs.contains { $0.id == id } }
+        return visible.isEmpty ? tabs.map(\.id) : visible
+    }
+
     func selectNextTab() {
+        let order = cyclableWorkspaceIds
         guard let currentId = selectedTabId,
-              let currentIndex = tabs.firstIndex(where: { $0.id == currentId }) else { return }
-        let nextIndex = (currentIndex + 1) % tabs.count
+              let currentIndex = order.firstIndex(of: currentId) else { return }
+        let nextId = order[(currentIndex + 1) % order.count]
 #if DEBUG
-        let nextId = tabs[nextIndex].id
         debugPrepareWorkspaceSwitch("next", from: currentId, to: nextId)
 #endif
         activateWorkspaceCycleHotWindow()
         selectWorkspaceId(
-            tabs[nextIndex].id,
+            nextId,
             notificationDismissalContext: .explicitWorkspaceResume
         )
         // Keyboard nav is an explicit "focus one workspace" gesture, so drop
         // any stale sidebar multi-selection (Shift-click range) so subsequent
         // batch actions don't operate on workspaces the user thought they
         // had unselected by moving on.
-        clearSidebarMultiSelection(except: tabs[nextIndex].id)
+        clearSidebarMultiSelection(except: nextId)
     }
 
     func selectPreviousTab() {
+        let order = cyclableWorkspaceIds
         guard let currentId = selectedTabId,
-              let currentIndex = tabs.firstIndex(where: { $0.id == currentId }) else { return }
-        let prevIndex = (currentIndex - 1 + tabs.count) % tabs.count
+              let currentIndex = order.firstIndex(of: currentId) else { return }
+        let prevId = order[(currentIndex - 1 + order.count) % order.count]
 #if DEBUG
-        let prevId = tabs[prevIndex].id
         debugPrepareWorkspaceSwitch("prev", from: currentId, to: prevId)
 #endif
         activateWorkspaceCycleHotWindow()
         selectWorkspaceId(
-            tabs[prevIndex].id,
+            prevId,
             notificationDismissalContext: .explicitWorkspaceResume
         )
-        clearSidebarMultiSelection(except: tabs[prevIndex].id)
+        clearSidebarMultiSelection(except: prevId)
     }
 
     /// Reduce sidebar multi-selection to a single workspace (or clear if
