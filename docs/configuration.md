@@ -2,6 +2,23 @@
 
 Global app preferences live in `~/.config/cmux/cmux.json`.
 
+## `sidebar.sessionStatusGroups`
+
+Defines the ordered status sections in the workspace sidebar. Pinned sessions always appear first, and statuses not assigned below appear in an **Other** section. Omitting this setting keeps the built-in Needs Attention, Running, and Finished sections.
+
+```json
+{
+  "sidebar": {
+    "sessionStatusGroups": [
+      { "id": "running", "title": "Running", "statuses": ["working", "babysitting"] },
+      { "id": "finished", "title": "Finished", "statuses": ["ready", "done", "exited"] }
+    ]
+  }
+}
+```
+
+Group IDs must be unique and may contain letters, numbers, dots, underscores, and hyphens. The `pinned` and `other` IDs are reserved. Each of the supported statuses (`ready`, `needsInput`, `working`, `babysitting`, `done`, and `exited`) can belong to at most one configured group.
+
 ## `app.confirmQuit`
 
 Controls when cmux asks before quitting:

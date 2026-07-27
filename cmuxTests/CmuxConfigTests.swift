@@ -31,6 +31,47 @@ final class CmuxConfigDecodingTests: XCTestCase {
         )
     }
 
+    func testDecodeSidebarSessionStatusGroups() throws {
+        let config = try decode("""
+        {
+          "sidebar": {
+            "sessionStatusGroups": [
+              { "id": "active", "title": "Active", "statuses": ["working", "babysitting", "needsInput"] },
+              { "id": "complete", "title": "Complete", "statuses": ["ready", "done"] }
+            ]
+          }
+        }
+        """)
+
+        XCTAssertEqual(config.sidebar?.sessionStatusGroups?.map(\.id), ["active", "complete"])
+        XCTAssertEqual(config.sidebar?.sessionStatusGroups?.first?.statuses, [.working, .babysitting, .needsInput])
+    }
+
+    func testSidebarSessionStatusGroupsRejectDuplicateAssignments() {
+        XCTAssertThrowsError(try decode("""
+        {
+          "sidebar": {
+            "sessionStatusGroups": [
+              { "id": "first", "title": "First", "statuses": ["working"] },
+              { "id": "second", "title": "Second", "statuses": ["working"] }
+            ]
+          }
+        }
+        """))
+    }
+
+    func testSidebarSessionStatusGroupsRejectReservedIDs() {
+        XCTAssertThrowsError(try decode("""
+        {
+          "sidebar": {
+            "sessionStatusGroups": [
+              { "id": "pinned", "title": "Pinned", "statuses": ["working"] }
+            ]
+          }
+        }
+        """))
+    }
+
     // MARK: Simple commands
 
     func testDecodeSimpleCommand() throws {

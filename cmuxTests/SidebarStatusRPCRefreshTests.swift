@@ -22,8 +22,8 @@ struct SidebarStatusRPCRefreshTests {
         #expect(finished.id == running.id)
         #expect(finished.status == .done)
         #expect(running.status == .working)
-        #expect(finished.group == .finished)
-        #expect(running.group == .running)
+        #expect(finished.groupID == "finished")
+        #expect(running.groupID == "running")
     }
 
     @Test

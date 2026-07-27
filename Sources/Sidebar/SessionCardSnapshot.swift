@@ -5,51 +5,21 @@ struct SidebarSessionRowSnapshot: Identifiable {
     let id: UUID
     let workspace: Workspace
     let status: SessionCardSnapshot.Status
-    let group: SessionCardSnapshot.Group
+    let groupID: String
 
-    init(workspace: Workspace, status: SessionCardSnapshot.Status) {
+    init(workspace: Workspace, status: SessionCardSnapshot.Status, groups: [SessionCardGroup] = []) {
         id = workspace.id
         self.workspace = workspace
         self.status = status
-        group = SessionCardSnapshot.Group.resolve(status: status, isPinned: workspace.isPinned)
+        groupID = SessionCardGroup.resolveID(
+            status: status,
+            isPinned: workspace.isPinned,
+            configured: groups
+        )
     }
 }
 
 struct SessionCardSnapshot: Equatable {
-    enum Group: Int, CaseIterable, Equatable {
-        case pinned
-        case needsAttention
-        case running
-        case finished
-
-        static func resolve(status: Status, isPinned: Bool) -> Group {
-            if isPinned {
-                return .pinned
-            }
-            switch status {
-            case .needsInput:
-                return .needsAttention
-            case .working:
-                return .running
-            case .ready, .done, .exited:
-                return .finished
-            }
-        }
-
-        var title: String {
-            switch self {
-            case .pinned:
-                return String(localized: "sidebar.sessionGroup.pinned", defaultValue: "Pinned")
-            case .needsAttention:
-                return String(localized: "sidebar.sessionGroup.needsAttention", defaultValue: "Needs Attention")
-            case .running:
-                return String(localized: "sidebar.sessionGroup.running", defaultValue: "Running")
-            case .finished:
-                return String(localized: "sidebar.sessionGroup.finished", defaultValue: "Finished")
-            }
-        }
-    }
-
     enum Host: Equatable {
         case laptop
         case devbox
@@ -101,10 +71,11 @@ struct SessionCardSnapshot: Equatable {
         }
     }
 
-    enum Status: String, Equatable {
+    enum Status: String, Codable, CaseIterable, Equatable, Hashable, Sendable {
         case ready
         case needsInput
         case working
+        case babysitting
         case done
         case exited
 
@@ -119,6 +90,8 @@ struct SessionCardSnapshot: Equatable {
                 self = .ready
             case "running", "working", "busy", "in-progress", "processing":
                 self = .working
+            case "babysitting", "babysit", "pr-babysitting":
+                self = .babysitting
             case "waiting", "needs-input", "needsinput", "blocked", "paused":
                 self = .needsInput
             case "done", "completed", "complete", "finished", "success", "succeeded":
@@ -134,6 +107,8 @@ struct SessionCardSnapshot: Equatable {
             switch sidebarEntry.icon {
             case "bolt.fill":
                 self = .working
+            case "figure.child":
+                self = .babysitting
             case "bell.fill", "exclamationmark.circle", "exclamationmark.triangle.fill":
                 self = .needsInput
             case "pause.circle.fill", "checkmark.circle", "checkmark.circle.fill":
@@ -153,6 +128,8 @@ struct SessionCardSnapshot: Equatable {
                 return String(localized: "sidebar.sessionCard.status.needsInput", defaultValue: "Needs input")
             case .working:
                 return String(localized: "sidebar.sessionCard.status.working", defaultValue: "Working")
+            case .babysitting:
+                return String(localized: "sidebar.sessionCard.status.babysitting", defaultValue: "Babysitting")
             case .done:
                 return String(localized: "sidebar.sessionCard.status.done", defaultValue: "Done")
             case .exited:
@@ -168,6 +145,8 @@ struct SessionCardSnapshot: Equatable {
                 return "exclamationmark.circle"
             case .working:
                 return "bolt.fill"
+            case .babysitting:
+                return "figure.child"
             case .done:
                 return "checkmark"
             case .exited:
@@ -183,6 +162,8 @@ struct SessionCardSnapshot: Equatable {
                 return "#E3B341"
             case .working:
                 return "#58A6FF"
+            case .babysitting:
+                return "#E67E22"
             case .done:
                 return "#8A8A95"
             case .exited:
@@ -197,6 +178,9 @@ struct SessionCardSnapshot: Equatable {
 
             if lifecycleStates.contains(.needsInput) || metadataStatuses.contains(.needsInput) {
                 return .needsInput
+            }
+            if metadataStatuses.contains(.babysitting) {
+                return .babysitting
             }
             if lifecycleStates.contains(.running) ||
                 metadataStatuses.contains(.working) ||

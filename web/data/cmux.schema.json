@@ -208,6 +208,40 @@
         }
       }
     },
+    "sidebar": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sessionStatusGroups": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "title", "statuses"],
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9._-]+$",
+                "not": { "enum": ["pinned", "other"] }
+              },
+              "title": {
+                "type": "string",
+                "minLength": 1
+              },
+              "statuses": {
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "enum": ["ready", "needsInput", "working", "babysitting", "done", "exited"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "surfaceTabBarButtons": {
       "title": "surfaceTabBarButtons",
       "description": "Legacy root-level surface tab bar buttons. Prefer ui.surfaceTabBar.buttons for new configs.",

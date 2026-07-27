@@ -167,6 +167,7 @@
 		C0DEF0A40000000000000001 /* CmuxConfigContextMenuTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0DEF0A40000000000000002 /* CmuxConfigContextMenuTests.swift */; };
 		A5001652 /* CmuxConfigExecutor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5001653 /* CmuxConfigExecutor.swift */; };
 		E30750000000000000000006 /* CmuxConfigNamedColorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E30750000000000000000005 /* CmuxConfigNamedColorTests.swift */; };
+		C5A700010000000000000003 /* CmuxConfigSidebarDefinition.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A700020000000000000004 /* CmuxConfigSidebarDefinition.swift */; };
 		C1A2B3C4D5E6F70800000001 /* CmuxConfigTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1A2B3C4D5E6F70800000002 /* CmuxConfigTests.swift */; };
 		C0DEF0A10000000000000001 /* CmuxConfigUI.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0DEF0A10000000000000002 /* CmuxConfigUI.swift */; };
 		C750100000000000000000A3 /* CmuxControlSocket in Frameworks */ = {isa = PBXBuildFile; productRef = C750100000000000000000A2 /* CmuxControlSocket */; };
@@ -201,6 +202,7 @@
 		A9F200000000000000000006 /* CmuxRuntimeDebugCaptureConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9F100000000000000000006 /* CmuxRuntimeDebugCaptureConfiguration.swift */; };
 		A9F20000000000000000001A /* CmuxRuntimeDebugCaptureSender.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9F10000000000000000001A /* CmuxRuntimeDebugCaptureSender.swift */; };
 		A9F200000000000000000007 /* CmuxRuntimeDebugCaptureSequence.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9F100000000000000000007 /* CmuxRuntimeDebugCaptureSequence.swift */; };
+		C5A700010000000000000005 /* CmuxSessionStatusGroupDefinition.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A700020000000000000006 /* CmuxSessionStatusGroupDefinition.swift */; };
 		CD0CFE5300000000CD0CFE53 /* CmuxSettings in Frameworks */ = {isa = PBXBuildFile; productRef = CD0CFE5200000000CD0CFE52 /* CmuxSettings */; };
 		D3610C010000000000000001 /* CmuxSettingsJSONPathSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3610C010000000000000002 /* CmuxSettingsJSONPathSupport.swift */; };
 		CD0CFE5600000000CD0CFE56 /* CmuxSettingsUI in Frameworks */ = {isa = PBXBuildFile; productRef = CD0CFE5500000000CD0CFE55 /* CmuxSettingsUI */; };
@@ -500,6 +502,7 @@
 		FE003106 /* SessionAgentPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE003006 /* SessionAgentPresentation.swift */; };
 		A9F200000000000000000008 /* SessionAgentSessionPanelSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9F100000000000000000008 /* SessionAgentSessionPanelSnapshot.swift */; };
 		D35600010000000000000001 /* SessionCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = D35600020000000000000002 /* SessionCard.swift */; };
+		C5A700010000000000000001 /* SessionCardGroup.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5A700020000000000000002 /* SessionCardGroup.swift */; };
 		D35600010000000000000003 /* SessionCardSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = D35600020000000000000004 /* SessionCardSnapshot.swift */; };
 		B3575000000000000000000C /* SessionIndexModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = B3575000000000000000000B /* SessionIndexModels.swift */; };
 		B35750000000000000000008 /* SessionIndexRegisteredAgents.swift in Sources */ = {isa = PBXBuildFile; fileRef = B35750000000000000000007 /* SessionIndexRegisteredAgents.swift */; };
@@ -927,6 +930,7 @@
 		C0DEF0A40000000000000002 /* CmuxConfigContextMenuTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CmuxConfigContextMenuTests.swift; sourceTree = "<group>"; };
 		A5001653 /* CmuxConfigExecutor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CmuxConfigExecutor.swift; sourceTree = "<group>"; };
 		E30750000000000000000005 /* CmuxConfigNamedColorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CmuxConfigNamedColorTests.swift; sourceTree = "<group>"; };
+		C5A700020000000000000004 /* CmuxConfigSidebarDefinition.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CmuxConfigSidebarDefinition.swift; sourceTree = "<group>"; };
 		C1A2B3C4D5E6F70800000002 /* CmuxConfigTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CmuxConfigTests.swift; sourceTree = "<group>"; };
 		C0DEF0A10000000000000002 /* CmuxConfigUI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CmuxConfigUI.swift; sourceTree = "<group>"; };
 		D1320AA0D1320AA0D1320AA5 /* CmuxDockTilePlugin.plugin */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CmuxDockTilePlugin.plugin; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -946,6 +950,7 @@
 		A9F100000000000000000006 /* CmuxRuntimeDebugCaptureConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CmuxRuntimeDebugCaptureConfiguration.swift; sourceTree = "<group>"; };
 		A9F10000000000000000001A /* CmuxRuntimeDebugCaptureSender.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CmuxRuntimeDebugCaptureSender.swift; sourceTree = "<group>"; };
 		A9F100000000000000000007 /* CmuxRuntimeDebugCaptureSequence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CmuxRuntimeDebugCaptureSequence.swift; sourceTree = "<group>"; };
+		C5A700020000000000000006 /* CmuxSessionStatusGroupDefinition.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CmuxSessionStatusGroupDefinition.swift; sourceTree = "<group>"; };
 		D3610C010000000000000002 /* CmuxSettingsJSONPathSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CmuxSettingsJSONPathSupport.swift; sourceTree = "<group>"; };
 		DC5DC5DC0000000000000002 /* CmuxSidebarActionDispatch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CmuxSidebarActionDispatch.swift; sourceTree = "<group>"; };
 		C0DE46030000000000000002 /* CMUXSidebarExtensionBrowserPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CMUXSidebarExtensionBrowserPanel.swift; sourceTree = "<group>"; };
@@ -1222,6 +1227,7 @@
 		FE003006 /* SessionAgentPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionAgentPresentation.swift; sourceTree = "<group>"; };
 		A9F100000000000000000008 /* SessionAgentSessionPanelSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionAgentSessionPanelSnapshot.swift; sourceTree = "<group>"; };
 		D35600020000000000000002 /* SessionCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sidebar/SessionCard.swift; sourceTree = "<group>"; };
+		C5A700020000000000000002 /* SessionCardGroup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sidebar/SessionCardGroup.swift; sourceTree = "<group>"; };
 		D35600020000000000000004 /* SessionCardSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sidebar/SessionCardSnapshot.swift; sourceTree = "<group>"; };
 		B3575000000000000000000B /* SessionIndexModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionIndexModels.swift; sourceTree = "<group>"; };
 		B35750000000000000000007 /* SessionIndexRegisteredAgents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionIndexRegisteredAgents.swift; sourceTree = "<group>"; };
@@ -1681,6 +1687,7 @@
 				243632BA1DBBA36FD46E0610 /* SidebarAppearanceSupport.swift */,
 				D35600020000000000000002 /* SessionCard.swift */,
 				D35600020000000000000004 /* SessionCardSnapshot.swift */,
+				C5A700020000000000000002 /* SessionCardGroup.swift */,
 				D50D9BCE46701FBA91C2EFB6 /* SidebarWorkspaceSnapshotRefreshPolicy.swift */,
 				D35450020000000000000002 /* SidebarWorkspaceRowHoverTracker.swift */,
 				C9A57104C9A57104C9A57104 /* SidebarWorkspaceGroupConfigOpener.swift */,
@@ -1980,6 +1987,8 @@
 				A5001651 /* CmuxConfig.swift */,
 				C10D00040000000000000004 /* CmuxSurfaceTabBarBuiltInAction.swift */,
 				C0DEF0A10000000000000002 /* CmuxConfigUI.swift */,
+				C5A700020000000000000004 /* CmuxConfigSidebarDefinition.swift */,
+				C5A700020000000000000006 /* CmuxSessionStatusGroupDefinition.swift */,
 				E30750000000000000000003 /* CmuxWorkspaceDefinition.swift */,
 				A5001653 /* CmuxConfigExecutor.swift */,
 				A5001655 /* CmuxActionTrust.swift */,
@@ -2711,6 +2720,7 @@
 				A72C9F4179B54DF38E99A021 /* CmuxCLIPathInstaller.swift in Sources */,
 				A5001650 /* CmuxConfig.swift in Sources */,
 				A5001652 /* CmuxConfigExecutor.swift in Sources */,
+				C5A700010000000000000003 /* CmuxConfigSidebarDefinition.swift in Sources */,
 				C0DEF0A10000000000000001 /* CmuxConfigUI.swift in Sources */,
 				E7E000000000000000000005 /* CmuxEventBus.swift in Sources */,
 				E7E00000000000000000000D /* CmuxEventLogWriter.swift in Sources */,
@@ -2726,6 +2736,7 @@
 				A9F200000000000000000006 /* CmuxRuntimeDebugCaptureConfiguration.swift in Sources */,
 				A9F20000000000000000001A /* CmuxRuntimeDebugCaptureSender.swift in Sources */,
 				A9F200000000000000000007 /* CmuxRuntimeDebugCaptureSequence.swift in Sources */,
+				C5A700010000000000000005 /* CmuxSessionStatusGroupDefinition.swift in Sources */,
 				D3610C010000000000000001 /* CmuxSettingsJSONPathSupport.swift in Sources */,
 				DC5DC5DC0000000000000001 /* CmuxSidebarActionDispatch.swift in Sources */,
 				C0DE46030000000000000001 /* CMUXSidebarExtensionBrowserPanel.swift in Sources */,
@@ -2909,6 +2920,7 @@
 				FE003106 /* SessionAgentPresentation.swift in Sources */,
 				A9F200000000000000000008 /* SessionAgentSessionPanelSnapshot.swift in Sources */,
 				D35600010000000000000001 /* SessionCard.swift in Sources */,
+				C5A700010000000000000001 /* SessionCardGroup.swift in Sources */,
 				D35600010000000000000003 /* SessionCardSnapshot.swift in Sources */,
 				B3575000000000000000000C /* SessionIndexModels.swift in Sources */,
 				B35750000000000000000008 /* SessionIndexRegisteredAgents.swift in Sources */,

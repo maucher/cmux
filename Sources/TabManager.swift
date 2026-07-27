@@ -6809,9 +6809,13 @@ class TabManager: ObservableObject {
 
     func selectNextTab() {
         let order = cyclableWorkspaceIds
-        guard let currentId = selectedTabId,
-              let currentIndex = order.firstIndex(of: currentId) else { return }
-        let nextId = order[(currentIndex + 1) % order.count]
+        guard let currentId = selectedTabId, !order.isEmpty else { return }
+        let nextId: UUID
+        if let currentIndex = order.firstIndex(of: currentId) {
+            nextId = order[(currentIndex + 1) % order.count]
+        } else {
+            nextId = order[0]
+        }
 #if DEBUG
         debugPrepareWorkspaceSwitch("next", from: currentId, to: nextId)
 #endif
@@ -6829,9 +6833,13 @@ class TabManager: ObservableObject {
 
     func selectPreviousTab() {
         let order = cyclableWorkspaceIds
-        guard let currentId = selectedTabId,
-              let currentIndex = order.firstIndex(of: currentId) else { return }
-        let prevId = order[(currentIndex - 1 + order.count) % order.count]
+        guard let currentId = selectedTabId, !order.isEmpty else { return }
+        let prevId: UUID
+        if let currentIndex = order.firstIndex(of: currentId) {
+            prevId = order[(currentIndex - 1 + order.count) % order.count]
+        } else {
+            prevId = order[order.count - 1]
+        }
 #if DEBUG
         debugPrepareWorkspaceSwitch("prev", from: currentId, to: prevId)
 #endif

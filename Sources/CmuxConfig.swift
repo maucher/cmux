@@ -18,6 +18,7 @@ struct CmuxConfigFile: Codable, Sendable {
     var commands: [CmuxCommandDefinition]
     var vault: CmuxVaultConfigDefinition?
     var workspaceGroups: CmuxConfigWorkspaceGroupsDefinition?
+    var sidebar: CmuxConfigSidebarDefinition?
 
     private enum CodingKeys: String, CodingKey {
         case actions
@@ -29,6 +30,7 @@ struct CmuxConfigFile: Codable, Sendable {
         case commands
         case vault
         case workspaceGroups
+        case sidebar
     }
 
     init(
@@ -40,7 +42,8 @@ struct CmuxConfigFile: Codable, Sendable {
         surfaceTabBarButtons: [CmuxSurfaceTabBarButton]? = nil,
         commands: [CmuxCommandDefinition] = [],
         vault: CmuxVaultConfigDefinition? = nil,
-        workspaceGroups: CmuxConfigWorkspaceGroupsDefinition? = nil
+        workspaceGroups: CmuxConfigWorkspaceGroupsDefinition? = nil,
+        sidebar: CmuxConfigSidebarDefinition? = nil
     ) {
         self.actions = actions
         self.ui = ui
@@ -51,6 +54,7 @@ struct CmuxConfigFile: Codable, Sendable {
         self.commands = commands
         self.vault = vault
         self.workspaceGroups = workspaceGroups
+        self.sidebar = sidebar
     }
 
     init(from decoder: Decoder) throws {
@@ -103,6 +107,38 @@ struct CmuxConfigFile: Codable, Sendable {
             CmuxConfigWorkspaceGroupsDefinition.self,
             forKey: .workspaceGroups
         )
+        sidebar = try container.decodeIfPresent(CmuxConfigSidebarDefinition.self, forKey: .sidebar)
+        try Self.validateSessionStatusGroups(
+            sidebar?.sessionStatusGroups,
+            codingPath: decoder.codingPath + [CodingKeys.sidebar]
+        )
+    }
+
+    private static func validateSessionStatusGroups(
+        _ groups: [CmuxSessionStatusGroupDefinition]?,
+        codingPath: [CodingKey]
+    ) throws {
+        guard let groups else { return }
+        var ids = Set<String>()
+        var statuses = Set<SessionCardSnapshot.Status>()
+        for group in groups {
+            guard ids.insert(group.id).inserted else {
+                throw DecodingError.dataCorrupted(
+                    DecodingError.Context(
+                        codingPath: codingPath,
+                        debugDescription: "sidebar.sessionStatusGroups must not contain duplicate ids"
+                    )
+                )
+            }
+            for status in group.statuses where !statuses.insert(status).inserted {
+                throw DecodingError.dataCorrupted(
+                    DecodingError.Context(
+                        codingPath: codingPath,
+                        debugDescription: "sidebar.sessionStatusGroups must assign each status at most once"
+                    )
+                )
+            }
+        }
     }
 
     private static func normalizedActions(
@@ -2157,6 +2193,7 @@ final class CmuxConfigStore: ObservableObject {
     /// anchor workspace's cwd. Empty when no `workspaceGroups.byCwd` block is
     /// configured.
     @Published private(set) var workspaceGroupConfigs: [CmuxResolvedWorkspaceGroupConfig] = []
+    @Published private(set) var sessionStatusGroups: [SessionCardGroup] = []
     @Published private(set) var surfaceTabBarButtons: [CmuxSurfaceTabBarButton] = CmuxSurfaceTabBarButton.defaults
     @Published private(set) var notificationHooks: [CmuxResolvedNotificationHook] = []
     @Published private(set) var configurationIssues: [CmuxConfigIssue] = []
@@ -2421,6 +2458,7 @@ final class CmuxConfigStore: ObservableObject {
         var configuredPromptLauncherSourcePath: String?
         var configuredSurfaceTabBarButtons: [CmuxSurfaceTabBarButton]?
         var configuredSurfaceTabBarButtonSourcePath: String?
+        var configuredSessionStatusGroups: [CmuxSessionStatusGroupDefinition]?
         let localPath = localConfigPath
         let localParseResult = localPath.map { parseConfig(at: $0) }
         let globalParseResult = parseConfig(at: globalConfigPath)
@@ -2468,6 +2506,7 @@ final class CmuxConfigStore: ObservableObject {
                 configuredSurfaceTabBarButtons = buttons
                 configuredSurfaceTabBarButtonSourcePath = localPath
             }
+            configuredSessionStatusGroups = localConfig.sidebar?.sessionStatusGroups
             for command in localConfig.commands {
                 if !seenNames.contains(command.name) {
                     commands.append(command)
@@ -2507,6 +2546,9 @@ final class CmuxConfigStore: ObservableObject {
                let buttons = globalConfig.surfaceTabBarButtons {
                 configuredSurfaceTabBarButtons = buttons
                 configuredSurfaceTabBarButtonSourcePath = globalConfigPath
+            }
+            if configuredSessionStatusGroups == nil {
+                configuredSessionStatusGroups = globalConfig.sidebar?.sessionStatusGroups
             }
             for command in globalConfig.commands {
                 if !seenNames.contains(command.name) {
@@ -2591,6 +2633,9 @@ final class CmuxConfigStore: ObservableObject {
             issues: &issues
         )
         workspaceGroupConfigs = resolvedGroupConfigs
+        sessionStatusGroups = configuredSessionStatusGroups?.map {
+            SessionCardGroup(id: $0.id, title: $0.title, statuses: Set($0.statuses))
+        } ?? []
         surfaceTabBarButtonSourcePath = configuredSurfaceTabBarButtonSourcePath
         surfaceTabBarCommandSourcePaths = resolvedButtons.terminalCommandSourcePaths
         surfaceTabBarWorkspaceCommands = resolvedWorkspaceButtons.workspaceCommands

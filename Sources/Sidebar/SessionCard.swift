@@ -6,6 +6,8 @@ struct SessionCard: View {
     let isActive: Bool
     let isHovered: Bool
     let fontScale: CGFloat
+    let canRestart: Bool
+    let onRestart: () -> Void
     let onClose: () -> Void
 
     var body: some View {
@@ -50,6 +52,22 @@ struct SessionCard: View {
                 .truncationMode(.tail)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
+            Button(action: onRestart) {
+                Image(systemName: "arrow.clockwise")
+                    .font(.system(size: scaled(9), weight: .semibold))
+                    .foregroundColor(hexColor("#8A8A95"))
+                    .frame(width: scaled(20), height: scaled(20))
+                    .background(
+                        Circle()
+                            .fill(Color.white.opacity(isHovered && canRestart ? 0.08 : 0.001))
+                    )
+            }
+            .buttonStyle(.plain)
+            .contentShape(Circle())
+            .disabled(!canRestart)
+            .help(restartHelpText)
+            .accessibilityLabel(Text(restartHelpText))
+
             Button(action: onClose) {
                 Image(systemName: "xmark")
                     .font(.system(size: scaled(9), weight: .semibold))
@@ -65,6 +83,16 @@ struct SessionCard: View {
             .help(String(localized: "sidebar.workspace.closeButton", defaultValue: "Close Workspace"))
             .accessibilityLabel(Text(String(localized: "sidebar.workspace.closeButton", defaultValue: "Close Workspace")))
         }
+    }
+
+    private var restartHelpText: String {
+        if canRestart {
+            return String(localized: "sidebar.sessionCard.restart", defaultValue: "Restart Session")
+        }
+        return String(
+            localized: "sidebar.sessionCard.restartUnavailable",
+            defaultValue: "Restart requires a remote terminal with a resumable agent session."
+        )
     }
 
     private var metaRow: some View {

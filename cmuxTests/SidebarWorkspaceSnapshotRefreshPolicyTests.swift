@@ -136,6 +136,7 @@ final class SidebarWorkspaceSnapshotRefreshPolicyTests: XCTestCase {
             branchLinesContainBranch: false,
             pullRequestRows: [],
             sessionStatus: sessionStatus,
+            canRestartSession: false,
             listeningPorts: listeningPorts
         )
     }
@@ -178,6 +179,7 @@ final class SessionCardSnapshotTests: XCTestCase {
         XCTAssertEqual(SessionCardSnapshot.Status(metadataValue: "ready"), .ready)
         XCTAssertEqual(SessionCardSnapshot.Status(metadataValue: "idle"), .ready)
         XCTAssertEqual(SessionCardSnapshot.Status(metadataValue: "connected"), .ready)
+        XCTAssertEqual(SessionCardSnapshot.Status(metadataValue: "babysitting"), .babysitting)
         XCTAssertEqual(SessionCardSnapshot.Status(metadataValue: "done"), .done)
         XCTAssertEqual(SessionCardSnapshot.Status(metadataValue: "offline"), .exited)
         XCTAssertNil(SessionCardSnapshot.Status(metadataValue: "unknown-status"))
@@ -202,20 +204,39 @@ final class SessionCardSnapshotTests: XCTestCase {
 
         let status = SessionCardSnapshot.Status(sidebarEntry: entry)
         XCTAssertEqual(status, .done)
-        XCTAssertEqual(SessionCardSnapshot.Group.resolve(status: .done, isPinned: false), .finished)
+        XCTAssertEqual(
+            SessionCardGroup.resolveID(status: .done, isPinned: false, configured: []),
+            "finished"
+        )
     }
 
     func testStatusGroupMappingUsesPinnedOverrideAndCanonicalStatus() {
-        XCTAssertEqual(SessionCardSnapshot.Group.resolve(status: .working, isPinned: true), .pinned)
-        XCTAssertEqual(SessionCardSnapshot.Group.resolve(status: .ready, isPinned: false), .needsAttention)
-        XCTAssertEqual(SessionCardSnapshot.Group.resolve(status: .needsInput, isPinned: false), .needsAttention)
-        XCTAssertEqual(SessionCardSnapshot.Group.resolve(status: .working, isPinned: false), .running)
-        XCTAssertEqual(SessionCardSnapshot.Group.resolve(status: .done, isPinned: false), .finished)
-        XCTAssertEqual(SessionCardSnapshot.Group.resolve(status: .exited, isPinned: false), .finished)
+        XCTAssertEqual(SessionCardGroup.resolveID(status: .working, isPinned: true, configured: []), "pinned")
+        XCTAssertEqual(SessionCardGroup.resolveID(status: .ready, isPinned: false, configured: []), "finished")
+        XCTAssertEqual(SessionCardGroup.resolveID(status: .needsInput, isPinned: false, configured: []), "needsAttention")
+        XCTAssertEqual(SessionCardGroup.resolveID(status: .working, isPinned: false, configured: []), "running")
+        XCTAssertEqual(SessionCardGroup.resolveID(status: .babysitting, isPinned: false, configured: []), "running")
+        XCTAssertEqual(SessionCardGroup.resolveID(status: .done, isPinned: false, configured: []), "finished")
+        XCTAssertEqual(SessionCardGroup.resolveID(status: .exited, isPinned: false, configured: []), "finished")
     }
 
     func testStatusGroupsHaveRequiredDisplayOrder() {
-        XCTAssertEqual(SessionCardSnapshot.Group.allCases, [.pinned, .needsAttention, .running, .finished])
+        XCTAssertEqual(
+            SessionCardGroup.groups(configured: []).map(\.id),
+            ["pinned", "needsAttention", "running", "finished", "other"]
+        )
+    }
+
+    func testConfiguredStatusGroupsUseFirstMatchAndOtherFallback() {
+        let groups = [
+            SessionCardGroup(id: "active", title: "Active", statuses: [.working, .needsInput]),
+            SessionCardGroup(id: "complete", title: "Complete", statuses: [.ready, .done]),
+        ]
+
+        XCTAssertEqual(SessionCardGroup.resolveID(status: .working, isPinned: false, configured: groups), "active")
+        XCTAssertEqual(SessionCardGroup.resolveID(status: .ready, isPinned: false, configured: groups), "complete")
+        XCTAssertEqual(SessionCardGroup.resolveID(status: .exited, isPinned: false, configured: groups), "other")
+        XCTAssertEqual(SessionCardGroup.resolveID(status: .exited, isPinned: true, configured: groups), "pinned")
     }
 
     @MainActor
@@ -234,6 +255,26 @@ final class SessionCardSnapshotTests: XCTestCase {
 
         XCTAssertTrue(workspace.clearAgentLifecycle(key: "claude_code", panelId: panelId))
         XCTAssertEqual(SessionCardSnapshot.Status.resolve(workspace: workspace), .working)
+    }
+
+    @MainActor
+    func testStatusResolverShowsBabysittingDuringRunningLifecycle() throws {
+        let manager = TabManager()
+        let workspace = try XCTUnwrap(manager.tabs.first)
+        let panelId = try XCTUnwrap(workspace.focusedPanelId)
+        workspace.setAgentLifecycle(key: "codex", panelId: panelId, lifecycle: .running)
+        workspace.statusEntries["workflow"] = SidebarStatusEntry(
+            key: "workflow",
+            value: "babysitting",
+            icon: "figure.child",
+            color: "#E67E22",
+            priority: 100
+        )
+
+        XCTAssertEqual(SessionCardSnapshot.Status.resolve(workspace: workspace), .babysitting)
+
+        workspace.setAgentLifecycle(key: "codex", panelId: panelId, lifecycle: .needsInput)
+        XCTAssertEqual(SessionCardSnapshot.Status.resolve(workspace: workspace), .needsInput)
     }
 
     @MainActor
@@ -299,6 +340,62 @@ final class SessionCardSnapshotTests: XCTestCase {
         workspace.statusEntries.removeValue(forKey: "session")
         workspace.untrackRemoteTerminalSurface(panelId)
         XCTAssertEqual(SessionCardSnapshot.Status.resolve(workspace: workspace), .exited)
+    }
+
+    @MainActor
+    func testSessionRestartRequiresRemoteTerminalAndResumableAgent() throws {
+        let manager = TabManager()
+        let workspace = try XCTUnwrap(manager.tabs.first)
+        let panelId = try XCTUnwrap(workspace.focusedPanelId)
+        let agent = SessionRestorableAgentSnapshot(
+            kind: .codex,
+            sessionId: "test-session",
+            workingDirectory: nil,
+            launchCommand: nil
+        )
+
+        workspace.setRestoredAgentSnapshotForTesting(agent, panelId: panelId)
+        XCTAssertFalse(workspace.canRestartSessionFromCard)
+
+        workspace.configureRemoteConnection(
+            WorkspaceRemoteConfiguration(
+                destination: "example-host",
+                port: nil,
+                identityFile: nil,
+                sshOptions: [],
+                localProxyPort: nil,
+                relayPort: nil,
+                relayID: nil,
+                relayToken: nil,
+                localSocketPath: nil,
+                terminalStartupCommand: "ssh -tt example-host",
+                preserveAfterTerminalExit: true
+            ),
+            autoConnect: false
+        )
+        XCTAssertTrue(workspace.canRestartSessionFromCard)
+
+        workspace.setRestoredAgentSnapshotForTesting(
+            SessionRestorableAgentSnapshot(
+                kind: .custom("unsupported"),
+                sessionId: "unsupported-session",
+                workingDirectory: nil,
+                launchCommand: nil
+            ),
+            panelId: panelId
+        )
+        XCTAssertFalse(workspace.canRestartSessionFromCard)
+    }
+
+    @MainActor
+    func testUnavailableSessionRestartDoesNothing() throws {
+        let manager = TabManager()
+        let workspace = try XCTUnwrap(manager.tabs.first)
+        let panelCount = workspace.sessionSnapshot(includeScrollback: false).panels.count
+
+        workspace.restartSessionFromCard()
+
+        XCTAssertEqual(workspace.sessionSnapshot(includeScrollback: false).panels.count, panelCount)
     }
 
     func testDiffParsingNormalizesSignedCounts() {

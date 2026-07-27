@@ -10679,6 +10679,8 @@ struct VerticalTabsSidebar: View {
     private var runningSessionGroupCollapsed = false
     @AppStorage("sidebar.sessionStatusGroup.finished.collapsed")
     private var finishedSessionGroupCollapsed = false
+    @AppStorage("sidebar.sessionStatusGroups.collapsedIDs")
+    private var customCollapsedSessionGroupIDs = ""
     /// Bumped whenever any workspace's currentDirectory changes; the group
     /// header's resolved cwd-based config (color/icon/context menu /
     /// newWorkspacePlacement) reads it through the body, so a state
@@ -11020,6 +11022,7 @@ struct VerticalTabsSidebar: View {
         let workspaceGroups: [WorkspaceGroup]
         let workspaceGroupById: [UUID: WorkspaceGroup]
         let workspaceGroupMenuSnapshot: WorkspaceGroupMenuSnapshot
+        let sessionGroups: [SessionCardGroup]
         let sessionRows: [SidebarSessionRowSnapshot]
         /// Workspace ids in the exact top-to-bottom order the sidebar renders
         /// them right now (collapsed status-group rows excluded).
@@ -11054,16 +11057,22 @@ struct VerticalTabsSidebar: View {
         let workspaceGroupMenuSnapshot = WorkspaceGroupMenuSnapshot(
             items: workspaceGroups.map { WorkspaceGroupMenuSnapshot.Item(id: $0.id, name: $0.name) }
         )
+        let configuredSessionGroups = cmuxConfigStore.sessionStatusGroups
+        let sessionGroups = SessionCardGroup.groups(configured: configuredSessionGroups)
         let sessionRows = tabs.map {
             let status = SessionCardSnapshot.Status.resolve(workspace: $0)
-            return SidebarSessionRowSnapshot(workspace: $0, status: status)
+            return SidebarSessionRowSnapshot(
+                workspace: $0,
+                status: status,
+                groups: configuredSessionGroups
+            )
         }
         // Mirrors the row order rendered in `workspaceRows(renderContext:)`:
         // walk status groups in display order, skipping collapsed ones, so
         // keyboard cycling (⌘⌃[ / ⌘⌃]) matches what's actually on screen.
-        let visibleOrderedWorkspaceIds = SessionCardSnapshot.Group.allCases.flatMap { group -> [UUID] in
+        let visibleOrderedWorkspaceIds = sessionGroups.flatMap { group -> [UUID] in
             guard !isSessionGroupCollapsed(group) else { return [] }
-            return sessionRows.filter { $0.group == group }.map(\.id)
+            return sessionRows.filter { $0.groupID == group.id }.map(\.id)
         }
         let draggedSidebarTabId = dragState.draggedTabId
         let sidebarReorderIds = draggedSidebarTabId.map {
@@ -11089,6 +11098,7 @@ struct VerticalTabsSidebar: View {
             workspaceGroups: workspaceGroups,
             workspaceGroupById: workspaceGroupById,
             workspaceGroupMenuSnapshot: workspaceGroupMenuSnapshot,
+            sessionGroups: sessionGroups,
             sessionRows: sessionRows,
             visibleOrderedWorkspaceIds: visibleOrderedWorkspaceIds
         )
@@ -12495,8 +12505,8 @@ struct VerticalTabsSidebar: View {
         // read them, never this sidebar body. See SidebarDragState and
         // https://github.com/manaflow-ai/cmux/issues/2586.
         let rows = LazyVStack(spacing: 0) {
-            ForEach(SessionCardSnapshot.Group.allCases, id: \.rawValue) { group in
-                let groupRows = renderContext.sessionRows.filter { $0.group == group }
+            ForEach(renderContext.sessionGroups) { group in
+                let groupRows = renderContext.sessionRows.filter { $0.groupID == group.id }
                 if !groupRows.isEmpty {
                     sessionGroupHeader(group)
                     if !isSessionGroupCollapsed(group) {
@@ -12533,7 +12543,7 @@ struct VerticalTabsSidebar: View {
         }
     }
 
-    private func sessionGroupHeader(_ group: SessionCardSnapshot.Group) -> some View {
+    private func sessionGroupHeader(_ group: SessionCardGroup) -> some View {
         Button {
             withAnimation(.easeInOut(duration: 0.16)) {
                 toggleSessionGroupCollapsed(group)
@@ -12566,30 +12576,42 @@ struct VerticalTabsSidebar: View {
         ))
     }
 
-    private func isSessionGroupCollapsed(_ group: SessionCardSnapshot.Group) -> Bool {
-        switch group {
-        case .pinned:
+    private func isSessionGroupCollapsed(_ group: SessionCardGroup) -> Bool {
+        switch group.id {
+        case SessionCardGroup.pinnedID:
             return pinnedSessionGroupCollapsed
-        case .needsAttention:
+        case "needsAttention":
             return needsAttentionSessionGroupCollapsed
-        case .running:
+        case "running":
             return runningSessionGroupCollapsed
-        case .finished:
+        case "finished":
             return finishedSessionGroupCollapsed
+        default:
+            return customCollapsedSessionGroupIDSet.contains(group.id)
         }
     }
 
-    private func toggleSessionGroupCollapsed(_ group: SessionCardSnapshot.Group) {
-        switch group {
-        case .pinned:
+    private func toggleSessionGroupCollapsed(_ group: SessionCardGroup) {
+        switch group.id {
+        case SessionCardGroup.pinnedID:
             pinnedSessionGroupCollapsed.toggle()
-        case .needsAttention:
+        case "needsAttention":
             needsAttentionSessionGroupCollapsed.toggle()
-        case .running:
+        case "running":
             runningSessionGroupCollapsed.toggle()
-        case .finished:
+        case "finished":
             finishedSessionGroupCollapsed.toggle()
+        default:
+            var ids = customCollapsedSessionGroupIDSet
+            if !ids.insert(group.id).inserted {
+                ids.remove(group.id)
+            }
+            customCollapsedSessionGroupIDs = ids.sorted().joined(separator: ",")
         }
+    }
+
+    private var customCollapsedSessionGroupIDSet: Set<String> {
+        Set(customCollapsedSessionGroupIDs.split(separator: ",").map(String.init))
     }
 
     /// Conditionally installs the row-frame `overlayPreferenceValue` reader (the part
@@ -16479,6 +16501,7 @@ struct SidebarWorkspaceSnapshotBuilder {
         let branchLinesContainBranch: Bool
         let pullRequestRows: [PullRequestDisplay]
         let sessionStatus: SessionCardSnapshot.Status
+        let canRestartSession: Bool
         let listeningPorts: [Int]
 
     }
@@ -17194,9 +17217,13 @@ struct TabItemView: View, Equatable {
 
         SessionCard(
             snapshot: cardSnapshot,
-            isActive: isActive || isMultiSelected,
+            isActive: isActive,
             isHovered: rowInteractionState.isPointerHovering,
             fontScale: fontScale,
+            canRestart: workspaceSnapshot.canRestartSession,
+            onRestart: {
+                tab.restartSessionFromCard()
+            },
             onClose: {
                 #if DEBUG
                 cmuxDebugLog("sidebar.close workspace=\(tab.id.uuidString.prefix(5)) method=sessionCardButton")
@@ -17939,6 +17966,7 @@ struct TabItemView: View, Equatable {
             branchLinesContainBranch: branchLinesContainBranch,
             pullRequestRows: pullRequestRows,
             sessionStatus: SessionCardSnapshot.Status.resolve(workspace: tab),
+            canRestartSession: tab.canRestartSessionFromCard,
             listeningPorts: detailVisibility.showsPorts ? tab.listeningPorts : []
         )
     }
