@@ -179,6 +179,7 @@ fileprivate func cmuxVsyncIOSurfaceTimelineCallback(
 @MainActor
 class TabManager: ObservableObject {
     weak var cmuxConfigStore: CmuxConfigStore?
+    let promptLauncherModel = PromptLauncherModel()
     private var promptLauncherRestartWorkspaceIds: Set<UUID> = []
 
     /// The window that owns this TabManager. Set by AppDelegate.registerMainWindow().
@@ -2199,6 +2200,7 @@ class TabManager: ObservableObject {
         // lives in another window or was already detached kills terminals nobody
         // asked to close and announces a close that did not happen.
         guard tabs.contains(where: { $0.id == workspace.id }) else { return }
+        triggerPromptLauncherCloseHook(workspace: workspace)
         panelTitleUpdateCoalescer.flushNow()
         sentryBreadcrumb("workspace.close", data: ["tabCount": tabs.count - 1])
         // Closing a mirrored remote tmux workspace DETACHES from the remote session,
@@ -2274,7 +2276,6 @@ class TabManager: ObservableObject {
                 workspaceOrderDidChange(movedWorkspaceIds: promotedAnchorIds)
             }
         }
-        triggerPromptLauncherCloseHook(workspace: workspace)
         publishCmuxWorkspaceClosed(workspace)
     }
 
@@ -2295,17 +2296,22 @@ class TabManager: ObservableObject {
         let environment = promptLauncher.environment
         let shouldForwardSocket = promptLauncher.forwardCmuxSocket
         let socketPath = TerminalController.shared.currentSocketPathForRemoteRestore()
-        Task.detached(priority: .utility) {
-            if delayBeforeRun {
-                try? await Task.sleep(for: .milliseconds(300))
-            }
-            let process = Self.promptLauncherHookProcess(
+        let workspaceName = workspace.customTitle ?? workspace.title
+        let enqueue = { [promptLauncherModel] in
+            promptLauncherModel.enqueueClose(
+                workspaceName: workspaceName,
                 shellCommand: shellCommand,
                 environment: environment,
-                forwardedSocketPath: shouldForwardSocket ? socketPath : nil,
-                discardsOutput: false
+                forwardedSocketPath: shouldForwardSocket ? socketPath : nil
             )
-            try? process.run()
+        }
+        if delayBeforeRun {
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(300))
+                enqueue()
+            }
+        } else {
+            enqueue()
         }
     }
 
@@ -2860,7 +2866,7 @@ class TabManager: ObservableObject {
             // markRemoteTmuxKillOnWindowCloseIfNeeded). Non-last workspaces also detach
             // via closeWorkspace.
             markRemoteTmuxKillOnWindowCloseIfNeeded(for: [workspace])
-            triggerPromptLauncherCloseHook(workspace: workspace, delayBeforeRun: true)
+            triggerPromptLauncherCloseHook(workspace: workspace)
             if let window {
                 window.performClose(nil)
             } else {

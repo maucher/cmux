@@ -153,6 +153,15 @@ struct SidebarWorkspaceSnapshotFactory {
                 ?? "#4493F8",
             host: host,
             branchName: branchName(),
+            pullRequests: workspace.sidebarPullRequestsInDisplayOrder().map {
+                SessionCardSnapshot.PullRequest(
+                    number: $0.number,
+                    label: $0.label,
+                    url: $0.url,
+                    status: $0.status,
+                    isStale: $0.isStale
+                )
+            },
             modelName: modelName,
             mode: mode,
             status: status,
@@ -190,7 +199,8 @@ struct SidebarWorkspaceSnapshotFactory {
     }
 
     private func indexedWorktreeNumber() -> Int? {
-        var candidates = [workspace.title, workspace.currentDirectory]
+        var candidates = [workspace.promptLauncherSlot, workspace.title, workspace.currentDirectory]
+            .compactMap { $0 }
         candidates.append(contentsOf: workspace.panelDirectories.values)
         for paneId in workspace.bonsplitController.allPaneIds {
             candidates.append(contentsOf: workspace.bonsplitController.tabs(inPane: paneId).map(\.title))
