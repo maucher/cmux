@@ -1,4 +1,5 @@
 import CmuxCore
+import CmuxSidebar
 import Foundation
 import Testing
 
@@ -15,11 +16,15 @@ struct SessionCardSnapshotTests {
         #expect(SessionCardSnapshot.Mode(metadataValue: "permission_edit") == .edit)
         #expect(SessionCardSnapshot.Mode(metadataValue: "anything else") == .defaultMode)
         #expect(SessionCardSnapshot.Mode(metadataValue: nil) == .defaultMode)
+        #expect(SessionCardSnapshot.Mode.plan.badgeDisplayName == "Plan")
+        #expect(SessionCardSnapshot.Mode.edit.badgeDisplayName == "Edit")
+        #expect(SessionCardSnapshot.Mode.defaultMode.badgeDisplayName == nil)
     }
 
     @Test func statusParsingRecognizesAgentLifecycleWords() {
         #expect(SessionCardSnapshot.Status(metadataValue: "working") == .working)
         #expect(SessionCardSnapshot.Status(metadataValue: "needs_input") == .needsInput)
+        #expect(SessionCardSnapshot.Status(metadataValue: "needs input") == .needsInput)
         #expect(SessionCardSnapshot.Status(metadataValue: "ready") == .ready)
         #expect(SessionCardSnapshot.Status(metadataValue: "offline") == .exited)
         #expect(SessionCardSnapshot.Status(metadataValue: "unknown-status") == nil)
@@ -60,10 +65,9 @@ struct SessionCardSnapshotTests {
 
     @Test func indexedWorktreeParsingRecognizesWorkspaceLaunchers() {
         #expect(SessionCardSnapshot.indexedWorktreeNumber(in: "/projects/service-wk3") == 3)
-        #expect(SessionCardSnapshot.indexedWorktreeNumber(in: "~/ws-wk3.sh") == 3)
+        #expect(SessionCardSnapshot.indexedWorktreeNumber(in: "wk3") == 3)
         #expect(SessionCardSnapshot.indexedWorktreeNumber(in: "[wk10] local") == 10)
         #expect(SessionCardSnapshot.indexedWorktreeNumber(in: "/tmp/wk7") == 7)
-        #expect(SessionCardSnapshot.indexedWorktreeNumber(in: "7️⃣ Cmux Test Six") == 7)
         #expect(SessionCardSnapshot.indexedWorktreeNumber(in: "/tmp/wk7-extra") == nil)
     }
 
@@ -131,6 +135,62 @@ struct SessionCardSnapshotTests {
     }
 
     @MainActor
+    @Test func runningLifecycleOverridesStaleNeedsInputStatus() throws {
+        let workspace = Workspace()
+        let panelID = try #require(workspace.focusedPanelId)
+        workspace.statusEntries["agent"] = SidebarStatusEntry(
+            key: "agent",
+            value: "Needs attention",
+            icon: "exclamationmark.circle",
+            priority: 100,
+            timestamp: Date(timeIntervalSince1970: 100)
+        )
+        workspace.setAgentLifecycle(key: "codex", panelId: panelID, lifecycle: .running)
+
+        #expect(SessionCardSnapshot.Status.resolve(workspace: workspace) == .working)
+    }
+
+    @MainActor
+    @Test func newestHighestPriorityWorkflowStatusSupersedesStaleAgentStatus() {
+        let workspace = Workspace()
+        workspace.statusEntries["agent"] = SidebarStatusEntry(
+            key: "agent",
+            value: "Needs attention",
+            icon: "exclamationmark.circle",
+            priority: 100,
+            timestamp: Date(timeIntervalSince1970: 100)
+        )
+        workspace.statusEntries["workflow"] = SidebarStatusEntry(
+            key: "workflow",
+            value: "Working",
+            priority: 110,
+            timestamp: Date(timeIntervalSince1970: 200)
+        )
+
+        #expect(SessionCardSnapshot.Status.resolve(workspace: workspace) == .working)
+    }
+
+    @MainActor
+    @Test func babysittingWorkflowSupersedesStaleAgentStatus() {
+        let workspace = Workspace()
+        workspace.statusEntries["agent"] = SidebarStatusEntry(
+            key: "agent",
+            value: "Needs attention",
+            icon: "exclamationmark.circle",
+            priority: 100,
+            timestamp: Date(timeIntervalSince1970: 100)
+        )
+        workspace.statusEntries["workflow"] = SidebarStatusEntry(
+            key: "workflow",
+            value: "Babysitting",
+            priority: 110,
+            timestamp: Date(timeIntervalSince1970: 200)
+        )
+
+        #expect(SessionCardSnapshot.Status.resolve(workspace: workspace) == .babysitting)
+    }
+
+    @MainActor
     @Test func persistentRemoteSessionRemainsRestartableAfterDisconnect() throws {
         let workspace = Workspace()
         let panelId = try #require(workspace.focusedPanelId)
@@ -173,4 +233,69 @@ struct SessionCardSnapshotTests {
         #expect(workspace.markRemoteTerminalSessionEnded(surfaceId: panelId, relayPort: 64_017))
         #expect(!workspace.activeRemoteTerminalSurfaceIds.contains(panelId))
     }
+
+    @MainActor
+    @Test func remoteSessionCardCarriesConcreteModelAndPullRequestLink() throws {
+        let workspace = Workspace(title: "Remote Work")
+        let panelId = try #require(workspace.focusedPanelId)
+        let pullRequestURL = try #require(URL(string: "https://github.com/manaflow-ai/cmux/pull/9876"))
+        workspace.configureRemoteConnection(
+            WorkspaceRemoteConfiguration(
+                destination: "devbox",
+                port: nil,
+                identityFile: nil,
+                sshOptions: [],
+                localProxyPort: nil,
+                relayPort: 64_018,
+                relayID: "session-card-metadata",
+                relayToken: String(repeating: "b", count: 64),
+                localSocketPath: "/tmp/cmux-session-card-metadata.sock",
+                terminalStartupCommand: "ssh devbox",
+                preserveAfterTerminalExit: true,
+                persistentDaemonSlot: "session-card-metadata"
+            ),
+            autoConnect: false
+        )
+        #expect(workspace.updateRemotePanelDirectory(panelId: panelId, directory: "/projects/cmux"))
+        workspace.panelGitBranches[panelId] = SidebarGitBranchState(
+            branch: "feature/a-very-long-session-card-branch",
+            isDirty: false
+        )
+        workspace.panelPullRequests[panelId] = SidebarPullRequestState(
+            number: 9876,
+            label: "PR",
+            url: pullRequestURL,
+            status: .open,
+            branch: "feature/a-very-long-session-card-branch"
+        )
+        workspace.statusEntries["agent.model"] = SidebarStatusEntry(
+            key: "agent.model",
+            value: "gpt-5.6",
+            timestamp: Date(timeIntervalSince1970: 100)
+        )
+
+        let suiteName = "SessionCardSnapshotTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let card = try #require(SidebarWorkspaceSnapshotFactory(
+            workspace: workspace,
+            workspaceNumber: 3,
+            settings: SidebarTabItemSettingsSnapshot(defaults: defaults),
+            showsAgentActivity: true
+        ).makeSnapshot().sessionCard)
+
+        #expect(card.host == .devbox)
+        #expect(card.modelName == "gpt-5.6")
+        #expect(card.branchName == "feature/a-very-long-session-card-branch")
+        #expect(card.pullRequests == [
+            SessionCardSnapshot.PullRequest(
+                number: 9876,
+                label: "PR",
+                url: pullRequestURL,
+                status: .open,
+                isStale: false
+            ),
+        ])
+    }
+
 }

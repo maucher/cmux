@@ -64,15 +64,27 @@ struct SessionCardSnapshot: Equatable {
             }
         }
 
-        var displayName: String {
+        var badgeDisplayName: String? {
             switch self {
             case .plan:
                 return String(localized: "sidebar.sessionCard.mode.plan", defaultValue: "Plan")
             case .defaultMode:
-                return String(localized: "sidebar.sessionCard.mode.default", defaultValue: "Default")
+                return nil
             case .edit:
                 return String(localized: "sidebar.sessionCard.mode.edit", defaultValue: "Edit")
             }
+        }
+    }
+
+    struct PullRequest: Equatable, Identifiable {
+        let number: Int
+        let label: String
+        let url: URL
+        let status: SidebarPullRequestStatus
+        let isStale: Bool
+
+        var id: String {
+            "\(label.lowercased())#\(number)|\(url.absoluteString)"
         }
     }
 
@@ -97,7 +109,7 @@ struct SessionCardSnapshot: Equatable {
                 self = .working
             case "babysitting", "babysit", "pr-babysitting":
                 self = .babysitting
-            case "waiting", "needs-input", "needsinput", "blocked", "paused":
+            case "waiting", "needs input", "needs-input", "needsinput", "blocked", "paused":
                 self = .needsInput
             case "done", "completed", "complete", "finished", "success", "succeeded":
                 self = .done
@@ -179,29 +191,29 @@ struct SessionCardSnapshot: Equatable {
         @MainActor
         static func resolve(workspace: Workspace) -> Status {
             let lifecycleStates = workspace.agentLifecycleStatesByPanelId.values.flatMap { $0.values }
-            let metadataStatuses = recognizedMetadataStatuses(in: workspace)
+            let metadataStatus = recognizedMetadataStatus(in: workspace)
 
-            if lifecycleStates.contains(.needsInput) || metadataStatuses.contains(.needsInput) {
-                return .needsInput
-            }
-            if metadataStatuses.contains(.babysitting) {
+            if metadataStatus == .babysitting {
                 return .babysitting
             }
             if lifecycleStates.contains(.running) ||
-                metadataStatuses.contains(.working) ||
+                metadataStatus == .working ||
                 workspace.remoteConnectionState == .connecting ||
                 workspace.remoteConnectionState == .reconnecting {
                 return .working
+            }
+            if lifecycleStates.contains(.needsInput) || metadataStatus == .needsInput {
+                return .needsInput
             }
             if workspace.isRemoteWorkspace,
                !workspace.hasActiveRemoteTerminalSessions,
                (workspace.remoteConnectionState == .disconnected || workspace.remoteConnectionState == .error) {
                 return .exited
             }
-            if metadataStatuses.contains(.ready) {
+            if metadataStatus == .ready {
                 return .ready
             }
-            if metadataStatuses.contains(.exited) {
+            if metadataStatus == .exited {
                 return .exited
             }
             if lifecycleStates.contains(.idle) ||
@@ -214,19 +226,20 @@ struct SessionCardSnapshot: Equatable {
         }
 
         @MainActor
-        private static func recognizedMetadataStatuses(in workspace: Workspace) -> [Status] {
-            let explicitKeys = ["session.status", "agent.status", "status"]
-            let values = explicitKeys.compactMap { workspace.statusEntries[$0]?.value }
-            let preferredKeys = Set(["workflow", "agent", "wk", "session"])
+        private static func recognizedMetadataStatus(in workspace: Workspace) -> Status? {
+            let preferredKeys = Set([
+                "session.status", "agent.status", "status",
+                "workflow", "agent", "wk", "session",
+            ])
                 .union(AgentHibernationLifecycleStatusKeys.allowedStatusKeys)
-            let inferredStatuses = workspace.sidebarStatusEntriesVisibleForDisplay()
+            return workspace.sidebarStatusEntriesVisibleForDisplay()
                 .filter { preferredKeys.contains($0.key) }
                 .sorted { lhs, rhs in
                     if lhs.priority != rhs.priority { return lhs.priority > rhs.priority }
                     return lhs.timestamp > rhs.timestamp
                 }
                 .compactMap(Status.init(sidebarEntry:))
-            return values.compactMap(Status.init(metadataValue:)) + inferredStatuses
+                .first
         }
     }
 
@@ -261,6 +274,7 @@ struct SessionCardSnapshot: Equatable {
     let colorHex: String
     let host: Host
     let branchName: String?
+    let pullRequests: [PullRequest]
     let modelName: String?
     let mode: Mode
     let status: Status
@@ -273,6 +287,7 @@ struct SessionCardSnapshot: Equatable {
         colorHex: String,
         host: Host,
         branchName: String?,
+        pullRequests: [PullRequest] = [],
         modelName: String?,
         mode: Mode,
         status: Status,
@@ -286,6 +301,7 @@ struct SessionCardSnapshot: Equatable {
         self.colorHex = colorHex
         self.host = host
         self.branchName = Self.nonEmpty(branchName)
+        self.pullRequests = pullRequests
         self.modelName = Self.nonEmpty(modelName)
         self.mode = mode
         self.status = status
@@ -311,17 +327,10 @@ struct SessionCardSnapshot: Equatable {
                 return slot
             }
         }
-        if let slot = leadingKeycapWorktreeNumber(in: lowercased) {
-            return slot
-        }
-
         let normalizedPath = lowercased
             .replacingOccurrences(of: "\\", with: "/")
             .replacingOccurrences(of: "~", with: "/")
         for component in normalizedPath.split(separator: "/", omittingEmptySubsequences: true) {
-            if let slot = indexedWorktreeNumber(inPathComponent: component, prefix: "ws-wk") {
-                return slot
-            }
             if let slot = indexedWorktreeNumber(inPathComponent: component, prefix: "wk") {
                 return slot
             }
@@ -331,25 +340,6 @@ struct SessionCardSnapshot: Equatable {
             }
         }
         return nil
-    }
-
-    private static func leadingKeycapWorktreeNumber(in value: String) -> Int? {
-        let scalars = Array(value.unicodeScalars)
-        guard let first = scalars.first,
-              let slot = Int(String(first)),
-              slot >= 0
-        else {
-            return nil
-        }
-
-        var index = 1
-        if index < scalars.count, scalars[index].value == 0xFE0F {
-            index += 1
-        }
-        guard index < scalars.count, scalars[index].value == 0x20E3 else {
-            return nil
-        }
-        return slot
     }
 
     private static func indexedWorktreeNumber(
