@@ -170,7 +170,8 @@ struct SidebarWorkspaceSnapshotFactory {
                 added: SessionCardSnapshot.Diff.parseCount(added),
                 deleted: SessionCardSnapshot.Diff.parseCount(deleted)
             ),
-            badge: badge
+            badge: badge,
+            isRestarting: workspace.isSessionRestartingFromCard
         )
     }
 
