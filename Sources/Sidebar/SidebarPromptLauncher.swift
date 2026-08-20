@@ -36,9 +36,37 @@ private struct SpinningCircleButton: View {
     }
 }
 
+/// Chrome for the launcher row's Auto reset button: 32pt height matching the
+/// adjacent pickers, accent-tinted while the default target+repository are
+/// selected.
+private struct PromptLauncherControlChrome<Content: View>: View {
+    let isActive: Bool
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        content
+            .frame(height: 32)
+            .padding(.horizontal, 9)
+            .background(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(isActive ? Color.accentColor.opacity(0.16) : Color.primary.opacity(0.06))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .strokeBorder(
+                        isActive ? Color.accentColor.opacity(0.4) : Color.primary.opacity(0.12),
+                        lineWidth: 1
+                    )
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+    }
+}
+
 struct SidebarPromptLauncher: View {
     @EnvironmentObject var tabManager: TabManager
     @EnvironmentObject var cmuxConfigStore: CmuxConfigStore
+
+    private static let controlHeight: CGFloat = 32
 
     var body: some View {
         @Bindable var model = tabManager.promptLauncherModel
@@ -54,6 +82,14 @@ struct SidebarPromptLauncher: View {
                 let providerID = config.providers.contains(where: { $0.id == model.selectedProvider })
                     ? model.selectedProvider
                     : config.selectedDefaultProviderID
+                let defaultTargetID = config.selectedDefaultTargetID(forRepositoryID: config.selectedDefaultRepositoryID)
+                let defaultTargetTitle = availableTargets.first(where: { $0.id == defaultTargetID })?.title
+                    ?? config.targets(forRepositoryID: config.selectedDefaultRepositoryID)
+                        .first(where: { $0.id == defaultTargetID })?.title
+                    ?? defaultTargetID
+                let isOnDefaultTarget = targetID == defaultTargetID
+                    && repositoryID == config.selectedDefaultRepositoryID
+
                 VStack(alignment: .leading, spacing: 4) {
                     PromptTextEditorContainer(
                         text: $model.promptText,
@@ -72,6 +108,29 @@ struct SidebarPromptLauncher: View {
                     .frame(height: 120)
 
                     HStack(spacing: 6) {
+                        // Pure reset, never sends: back to the default target
+                        // (auto) and default repository, keeping the provider.
+                        Button {
+                            model.selectedTarget = defaultTargetID
+                            model.selectRepository(config.selectedDefaultRepositoryID, config: config)
+                        } label: {
+                            PromptLauncherControlChrome(isActive: isOnDefaultTarget) {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "bolt.fill")
+                                        .font(.system(size: 9, weight: .semibold))
+                                    Text(defaultTargetTitle)
+                                        .font(.system(size: 10, weight: .semibold))
+                                        .lineLimit(1)
+                                }
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .help(String(localized: "sidebar.prompt_launcher.autoTargetHelp",
+                                     defaultValue: "Reset to the default target and repository"))
+                        .accessibilityLabel(
+                            String(localized: "sidebar.prompt_launcher.autoTarget", defaultValue: "Auto target")
+                        )
+
                         Picker(
                             selection: Binding(
                                 get: { targetID },
@@ -84,7 +143,8 @@ struct SidebarPromptLauncher: View {
                             }
                         }
                         .controlSize(.small)
-                        .frame(maxWidth: config.repositories.isEmpty ? 110 : .infinity)
+                        .frame(height: Self.controlHeight)
+                        .frame(maxWidth: .infinity)
 
                         Picker(
                             selection: Binding(
@@ -98,7 +158,8 @@ struct SidebarPromptLauncher: View {
                             }
                         }
                         .controlSize(.small)
-                        .frame(maxWidth: config.repositories.isEmpty ? 100 : .infinity)
+                        .frame(height: Self.controlHeight)
+                        .frame(maxWidth: .infinity)
 
                         if !config.repositories.isEmpty {
                             Picker(
@@ -113,13 +174,12 @@ struct SidebarPromptLauncher: View {
                                 }
                             }
                             .controlSize(.small)
+                            .frame(height: Self.controlHeight)
                             .frame(maxWidth: .infinity)
                             .accessibilityLabel(
                                 String(localized: "sidebar.prompt_launcher.repository", defaultValue: "Repository")
                             )
                         }
-
-                        Spacer()
 
                         Button {
                             model.launch(
@@ -132,7 +192,7 @@ struct SidebarPromptLauncher: View {
                             ZStack {
                                 Circle()
                                     .fill(Color.accentColor)
-                                    .frame(width: 24, height: 24)
+                                    .frame(width: Self.controlHeight, height: Self.controlHeight)
                                 Image(systemName: "arrow.up")
                                     .font(.system(size: 11, weight: .bold))
                                     .foregroundColor(.white)

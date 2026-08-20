@@ -10872,6 +10872,11 @@ struct VerticalTabsSidebar: View, Equatable {
     @ObservedObject var fileExplorerState: FileExplorerState
     var featureFlags: CmuxFeatureFlags = .shared
     var isPresented: Bool = true
+    // Measured height of the prompt-launcher + footer overlay (a sibling of
+    // the scroll area, not a row inside it), so the workspace list's bottom
+    // safe-area inset can grow to match instead of the fixed scrim height —
+    // otherwise the last session cards are hidden behind a tall launcher.
+    @State private var promptLauncherOverlayHeight: CGFloat = SidebarWorkspaceListMetrics.bottomScrimHeight
     let sidebarUnread: SidebarUnreadModel
     let titlebarControlsLayoutModel: TitlebarControlsLayoutModel
     let windowId: UUID
@@ -11362,7 +11367,18 @@ struct VerticalTabsSidebar: View, Equatable {
             rows: sessionRows,
             collapsedGroupIDs: collapsedSessionGroupIDs
         )
-        let visibleOrderedWorkspaceIds = sessionListItems.visibleWorkspaceIDs
+        // Keyboard cycling (⌥↑/↓) must be able to reach every session, not
+        // just the ones currently rendered — a collapsed group (e.g.
+        // "Finished") would otherwise silently remove its workspaces from
+        // the cycle order, which reads as "some sessions get skipped" when
+        // moving up/down. Render with no groups collapsed purely to compute
+        // the full navigation order; the visually-rendered `sessionListItems`
+        // above is untouched.
+        let visibleOrderedWorkspaceIds = SidebarSessionListItem.renderItems(
+            groups: sessionGroups,
+            rows: sessionRows,
+            collapsedGroupIDs: []
+        ).visibleWorkspaceIDs
         let draggedSidebarTabId = dragState.draggedTabId
         let dropIndicatorScope = dragState.dropIndicatorScope
         let sidebarReorderIds = draggedSidebarTabId.map {
@@ -11433,6 +11449,19 @@ struct VerticalTabsSidebar: View, Equatable {
                     )
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
+                .background(
+                    GeometryReader { proxy in
+                        Color.clear.preference(
+                            key: SidebarPromptLauncherOverlayHeightPreferenceKey.self,
+                            value: proxy.size.height
+                        )
+                    }
+                )
+            }
+        }
+        .onPreferenceChange(SidebarPromptLauncherOverlayHeightPreferenceKey.self) { height in
+            if height > 0 {
+                promptLauncherOverlayHeight = height
             }
         }
         .accessibilityIdentifier("Sidebar")
@@ -11615,7 +11644,10 @@ struct VerticalTabsSidebar: View, Equatable {
         renderContext: WorkspaceListRenderContext,
         unreadSnapshot: SidebarUnreadSnapshot
     ) -> some View {
-        let scrollInsets = SidebarWorkspaceScrollInsets.workspaceList
+        let scrollInsets = SidebarWorkspaceScrollInsets(
+            top: SidebarWorkspaceListMetrics.scrollTopInset,
+            bottom: max(SidebarWorkspaceListMetrics.bottomScrimHeight, promptLauncherOverlayHeight)
+        )
         return GeometryReader { viewport in
             // Keep viewport geometry as a downward-only layout input. Writing
             // this value into @State from onGeometryChange feeds an
@@ -14929,6 +14961,14 @@ struct SidebarWorkspaceRowFramePreferenceKey: PreferenceKey {
 
     static func reduce(value: inout [UUID: Anchor<CGRect>], nextValue: () -> [UUID: Anchor<CGRect>]) {
         value.merge(nextValue()) { _, next in next }
+    }
+}
+
+struct SidebarPromptLauncherOverlayHeightPreferenceKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }
 

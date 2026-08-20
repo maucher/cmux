@@ -6392,6 +6392,11 @@ final class Workspace: Identifiable, ObservableObject, FilePreviewTabMetadataHos
         return Self.defaultSSHPTYSessionID(workspaceId: id, panelId: panelId)
     }
 
+    /// True while a session-card restart (restart hook or local terminal
+    /// replacement) is in flight. Published so the sidebar snapshot pipeline
+    /// rebuilds the card, which renders the restart control as a spinner.
+    @Published var isSessionRestartingFromCard: Bool = false
+
     /// Replaces the card's remote agent terminal after the new connection reports a TTY.
     func restartSessionFromCard() {
         guard let oldPanelId = restartableSessionCardPanelId()

@@ -2328,11 +2328,19 @@ class TabManager: ObservableObject {
                   configSourcePath: cmuxConfigStore.promptLauncherSourcePath,
                   globalConfigPath: cmuxConfigStore.globalConfigPath
               ) else {
+            // The local restart is near-instant; hold the spinner briefly so
+            // the click still gets visible acknowledgement.
+            workspace.isSessionRestartingFromCard = true
             workspace.restartSessionFromCard()
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(1.5))
+                workspace.isSessionRestartingFromCard = false
+            }
             return
         }
 
         promptLauncherRestartWorkspaceIds.insert(workspace.id)
+        workspace.isSessionRestartingFromCard = true
         let workspaceId = workspace.id
         let environment = promptLauncher.environment
         let shouldForwardSocket = promptLauncher.forwardCmuxSocket
@@ -2357,6 +2365,7 @@ class TabManager: ObservableObject {
             if !succeeded {
                 workspace.restartSessionFromCard()
             }
+            workspace.isSessionRestartingFromCard = false
         }
     }
 
