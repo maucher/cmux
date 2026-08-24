@@ -17,9 +17,8 @@ struct SessionCard: View {
             SessionCardSpine(colorHex: snapshot.colorHex)
                 .padding(.vertical, 7)
 
-            VStack(alignment: .leading, spacing: 7) {
+            VStack(alignment: .leading, spacing: 5) {
                 topRow
-                hostRow
                 if !snapshot.pullRequests.isEmpty {
                     pullRequestRows
                 }
@@ -28,7 +27,7 @@ struct SessionCard: View {
                 }
                 footerRow
             }
-            .padding(.vertical, 9)
+            .padding(.vertical, 7)
             .padding(.leading, 15)
             .padding(.trailing, 11)
         }
@@ -52,6 +51,8 @@ struct SessionCard: View {
                 colorHex: snapshot.colorHex,
                 fontScale: fontScale
             )
+            .help(snapshot.host.displayName)
+            .accessibilityLabel(Text(snapshot.host.displayName))
 
             Text(snapshot.name)
                 .font(.custom("Inter", size: scaled(12.5)).weight(.semibold))
@@ -61,19 +62,29 @@ struct SessionCard: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
 
             Button(action: onRestart) {
-                Image(systemName: "arrow.clockwise")
-                    .font(.system(size: scaled(9), weight: .semibold))
-                    .foregroundColor(hexColor("#8A8A95"))
-                    .frame(width: scaled(20), height: scaled(20))
-                    .background(
-                        Circle()
-                            .fill(Color.white.opacity(isHovered ? 0.08 : 0.001))
-                    )
+                Group {
+                    if snapshot.isRestarting {
+                        SessionCardRestartSpinner(
+                            size: scaled(9),
+                            color: SessionCardColor.color(hex: "#58A6FF", fallbackHex: "#58A6FF")
+                        )
+                    } else {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: scaled(9), weight: .semibold))
+                            .foregroundColor(hexColor("#8A8A95"))
+                    }
+                }
+                .frame(width: scaled(20), height: scaled(20))
+                .background(
+                    Circle()
+                        .fill(Color.white.opacity(isHovered ? 0.08 : 0.001))
+                )
             }
             .buttonStyle(.plain)
+            .disabled(snapshot.isRestarting)
             .contentShape(Circle())
-            .help(restartHelpText)
-            .accessibilityLabel(Text(restartHelpText))
+            .help(snapshot.isRestarting ? restartingHelpText : restartHelpText)
+            .accessibilityLabel(Text(snapshot.isRestarting ? restartingHelpText : restartHelpText))
 
             Button(action: onClose) {
                 Image(systemName: "xmark")
@@ -96,20 +107,8 @@ struct SessionCard: View {
         String(localized: "sidebar.sessionCard.restart", defaultValue: "Restart Session")
     }
 
-    private var hostRow: some View {
-        HStack(spacing: 6) {
-            Image(systemName: hostIconName)
-                .font(.system(size: scaled(12), weight: .regular))
-                .symbolRenderingMode(.monochrome)
-                .frame(width: scaled(13), height: scaled(13))
-
-            Text(snapshot.host.displayName)
-                .font(.custom("Inter", size: scaled(11)))
-                .lineLimit(1)
-
-            Spacer(minLength: 0)
-        }
-        .foregroundColor(hexColor("#8A8A95"))
+    private var restartingHelpText: String {
+        String(localized: "sidebar.sessionCard.restarting", defaultValue: "Restarting Session…")
     }
 
     private var pullRequestRows: some View {
@@ -203,15 +202,6 @@ struct SessionCard: View {
                 .font(.custom("JetBrains Mono", size: scaled(11)).weight(.medium))
                 .lineLimit(1)
             }
-        }
-    }
-
-    private var hostIconName: String {
-        switch snapshot.host {
-        case .laptop:
-            return "laptopcomputer"
-        case .devbox:
-            return "server.rack"
         }
     }
 
@@ -321,6 +311,28 @@ struct SessionCard: View {
 
     private func hexColor(_ hex: String) -> Color {
         SessionCardColor.color(hex: hex, fallbackHex: "#FFFFFF")
+    }
+}
+
+/// Continuously rotating restart glyph shown while a session-card restart is
+/// in flight. Value-only inputs — no observable references — so it is safe
+/// below the sidebar's LazyVStack boundary; the repeat-forever animation is
+/// started from onAppear (an action, not a body-time state write).
+private struct SessionCardRestartSpinner: View {
+    let size: CGFloat
+    let color: Color
+    @State private var rotation: Double = 0
+
+    var body: some View {
+        Image(systemName: "arrow.clockwise")
+            .font(.system(size: size, weight: .semibold))
+            .foregroundColor(color)
+            .rotationEffect(.degrees(rotation))
+            .onAppear {
+                withAnimation(.linear(duration: 0.9).repeatForever(autoreverses: false)) {
+                    rotation = 360
+                }
+            }
     }
 }
 

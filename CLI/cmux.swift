@@ -191,6 +191,8 @@ struct ClaudeHookSessionRecord: Codable {
     var autoNameRecentMessages: [AutoNamingTranscriptMessage]?
     var autoNameMessageSequence: Int?
     var hadPendingBackgroundWorkAtStop: Bool?
+    /// In-flight Task-tool subagents tracked via SubagentStart/SubagentStop hooks.
+    var activeSubagentCount: Int?
 }
 
 struct ClaudeHookActiveSessionRecord: Codable {
@@ -265,6 +267,31 @@ final class ClaudeHookSessionStore {
                   record.lastPermissionMode != mode else { return }
             record.lastPermissionMode = mode
             state.sessions[normalized] = record
+        }
+    }
+
+    func activeSubagentCount(sessionId: String) -> Int {
+        let normalized = normalizeSessionId(sessionId)
+        guard !normalized.isEmpty else { return 0 }
+        return (try? withLockedState { state in
+            state.sessions[normalized]?.activeSubagentCount ?? 0
+        }) ?? 0
+    }
+
+    @discardableResult
+    func adjustActiveSubagentCount(sessionId: String, delta: Int) throws -> Int {
+        let normalized = normalizeSessionId(sessionId)
+        guard !normalized.isEmpty else { return 0 }
+        return try withLockedState { state in
+            guard var record = state.sessions[normalized] else { return 0 }
+            let now = Date().timeIntervalSince1970
+            let current = record.activeSubagentCount ?? 0
+            let next = max(0, current + delta)
+            record.activeSubagentCount = next > 0 ? next : nil
+            record.updatedAt = now
+            state.sessions[normalized] = record
+            try saveUnlocked(state)
+            return next
         }
     }
 
@@ -25224,6 +25251,63 @@ struct CMUXCLI {
             }
             printClaudeHookAck()
 
+        case "subagent-start":
+            telemetry.breadcrumb("claude-hook.subagent-start")
+            let mappedSubagentStartSession = parsedInput.sessionId.flatMap { try? sessionStore.lookup(sessionId: $0) }
+            guard let subagentStartSessionId = parsedInput.sessionId,
+                  let resolvedSubagentStartTarget = try resolveClaudeHookDeliveryTarget(
+                    mappedSession: mappedSubagentStartSession,
+                    routing: hookRouting,
+                    client: client
+                  ), resolvedSubagentStartTarget.isAuthoritative else {
+                printClaudeHookAck()
+                return
+            }
+            _ = try? sessionStore.adjustActiveSubagentCount(sessionId: subagentStartSessionId, delta: 1)
+            setAgentLifecycle(
+                client: client,
+                key: Self.claudeCodeStatusKey,
+                lifecycle: .running,
+                workspaceId: resolvedSubagentStartTarget.workspaceId,
+                surfaceId: resolvedSubagentStartTarget.surfaceId
+            )
+            printClaudeHookAck()
+
+        case "subagent-stop":
+            telemetry.breadcrumb("claude-hook.subagent-stop")
+            let mappedSubagentStopSession = parsedInput.sessionId.flatMap { try? sessionStore.lookup(sessionId: $0) }
+            guard let subagentStopSessionId = parsedInput.sessionId,
+                  let resolvedSubagentStopTarget = try resolveClaudeHookDeliveryTarget(
+                    mappedSession: mappedSubagentStopSession,
+                    routing: hookRouting,
+                    client: client
+                  ), resolvedSubagentStopTarget.isAuthoritative else {
+                printClaudeHookAck()
+                return
+            }
+            let remainingSubagents = (try? sessionStore.adjustActiveSubagentCount(
+                sessionId: subagentStopSessionId,
+                delta: -1
+            )) ?? 0
+            if remainingSubagents == 0, mappedSubagentStopSession?.hadPendingBackgroundWorkAtStop != true {
+                setAgentLifecycle(
+                    client: client,
+                    key: Self.claudeCodeStatusKey,
+                    lifecycle: .idle,
+                    workspaceId: resolvedSubagentStopTarget.workspaceId,
+                    surfaceId: resolvedSubagentStopTarget.surfaceId
+                )
+                try? setClaudeStatus(
+                    client: client,
+                    workspaceId: resolvedSubagentStopTarget.workspaceId,
+                    surfaceId: resolvedSubagentStopTarget.surfaceId,
+                    value: String(localized: "agent.generic.notification.status.idle", defaultValue: "Idle"),
+                    icon: "pause.circle.fill",
+                    color: "#8E8E93"
+                )
+            }
+            printClaudeHookAck()
+
         case "stop", "idle":
             telemetry.breadcrumb("claude-hook.stop")
             do {
@@ -25272,7 +25356,11 @@ struct CMUXCLI {
                 // background task or a pending cron). Cached on the session record so
                 // the ~60s-later idle_prompt Notification can consult it, and forwarded
                 // to the app so it can suppress the done-ping until work truly drains.
-                let hasPendingBackgroundWork = hasActiveClaudeBackgroundWork(parsedInput)
+                let hadBackgroundTasks = hasActiveClaudeBackgroundWork(parsedInput)
+                let activeSubagents = parsedInput.sessionId.map {
+                    sessionStore.activeSubagentCount(sessionId: $0)
+                } ?? 0
+                let hasPendingBackgroundWork = hadBackgroundTasks || activeSubagents > 0
 
                 // Update session with transcript summary and send completion notification.
                 let completion = summarizeClaudeHookStop(
@@ -25293,7 +25381,7 @@ struct CMUXCLI {
                         agentLifecycle: hasPendingBackgroundWork ? .running : .idle,
                         lastSubtitle: completion?.subtitle,
                         lastBody: completion?.body,
-                        hadPendingBackgroundWorkAtStop: hasPendingBackgroundWork,
+                        hadPendingBackgroundWorkAtStop: hadBackgroundTasks,
                         markActive: true,
                         allowsNewSessionReplacement: true
                     )
@@ -28399,7 +28487,7 @@ struct CMUXCLI {
     }
 
     /// True when a Claude `Stop`/`Notification` payload reports unfinished
-    /// background work: any `background_tasks` entry still `running`, or a
+    /// background work: any non-terminal `background_tasks` entry, or a
     /// non-empty `session_crons`. A `nil` rawObject or absent keys (claude
     /// < 2.1.145) yield `false`, so older clients behave exactly as before.
     /// Pure over `rawObject` so both the notify gate and the hibernation
@@ -28408,7 +28496,11 @@ struct CMUXCLI {
         guard let obj = parsedInput.rawObject else { return false }
         if let crons = obj["session_crons"] as? [Any], !crons.isEmpty { return true }
         if let tasks = obj["background_tasks"] as? [[String: Any]] {
-            return tasks.contains { ($0["status"] as? String) == "running" }
+            let terminalStatuses: Set<String> = ["completed", "failed", "killed", "cancelled", "done"]
+            return tasks.contains { task in
+                guard let status = (task["status"] as? String)?.lowercased() else { return true }
+                return !terminalStatuses.contains(status)
+            }
         }
         return false
     }
@@ -31555,7 +31647,15 @@ export default CMUXSessionRestore;
             ?? normalizedHookValue(env["CMUX_AGENT_LAUNCH_CWD"])
             ?? normalizedHookValue(env["PWD"]) ?? (def.name == "codex" ? normalizedHookValue(FileManager.default.currentDirectoryPath) : nil)
         let sessionId = resolvedAgentHookSessionId(def: def, input: input, env: env, cwd: hookCwd)
-        let action = Self.subcommandActions[subcommand] ?? .noop
+        let action: AgentHookAction = {
+            let base = Self.subcommandActions[subcommand] ?? .noop
+            // Cursor emits afterAgentResponse at every LLM boundary mid-turn; only
+            // the real stop event should flip the pane to Ready.
+            if def.name == "cursor", subcommand == "agent-response" {
+                return .noop
+            }
+            return base
+        }()
 #if DEBUG
         agentHookDebugLog(
             "agentHook.start agent=\(def.name) subcommand=\(subcommand) session=\(agentHookDebugShort(sessionId)) inputSession=\(agentHookDebugShort(input.sessionId)) resumed=\(env["CMUX_AGENT_RESUME_LAUNCH"] == "1" ? 1 : 0) rawBytes=\(rawInput.utf8.count) hasCwd=\(hookCwd == nil ? 0 : 1) envWorkspace=\(env["CMUX_WORKSPACE_ID"] == nil ? 0 : 1) envSurface=\(env["CMUX_SURFACE_ID"] == nil ? 0 : 1) directWorkspace=\(directWorkspaceArg == nil ? 0 : 1) directSurface=\(directSurfaceArg == nil ? 0 : 1) invalidDirect=\(hasUnusableDirectBinding ? 1 : 0) processBinding=\(processBindingDebugState()) socketName=\(agentHookDebugSocketName(client.socketPath))",
@@ -32697,13 +32797,17 @@ export default CMUXSessionRestore;
                         client: client
                     )
                 } else {
-                    setAgentLifecycle(
-                        client: client,
-                        key: def.statusKey,
-                        lifecycle: .idle,
-                        workspaceId: workspaceId,
-                        surfaceId: surfaceId
-                    )
+                    let shouldKeepRunningForSiblingSession =
+                        def.name == "codex" && hasOtherRunningSession(workspaceId: workspaceId)
+                    if !shouldKeepRunningForSiblingSession {
+                        setAgentLifecycle(
+                            client: client,
+                            key: def.statusKey,
+                            lifecycle: .idle,
+                            workspaceId: workspaceId,
+                            surfaceId: surfaceId
+                        )
+                    }
                     setIdleStatusUnlessAnotherSessionIsRunning(workspaceId: workspaceId, surfaceId: surfaceId)
                 }
             }

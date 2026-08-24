@@ -14,7 +14,12 @@ struct PromptTextEditor: NSViewRepresentable {
         guard let tv = scrollView.documentView as? NSTextView else { return scrollView }
         tv.delegate = context.coordinator
         tv.font = .systemFont(ofSize: 12)
-        tv.isRichText = false
+        tv.isRichText = true
+        tv.isAutomaticLinkDetectionEnabled = true
+        tv.linkTextAttributes = [
+            .foregroundColor: NSColor.linkColor,
+            .underlineStyle: NSUnderlineStyle.single.rawValue,
+        ]
         tv.drawsBackground = false
         tv.isAutomaticQuoteSubstitutionEnabled = false
         tv.isAutomaticDashSubstitutionEnabled = false

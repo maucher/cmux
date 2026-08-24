@@ -128,6 +128,37 @@ struct ControlCommandCoordinatorSidebarV1Tests {
         #expect(context.statusUpsertCall == nil)
     }
 
+    @Test func v2StatusSetResolvesWorkspaceRefBeforeMutation() {
+        let context = FakeSidebarV1ControlCommandContext()
+        let coordinator = ControlCommandCoordinator(context: context)
+        let workspaceID = UUID()
+        let workspaceRef = coordinator.handles.ensureRef(kind: .workspace, uuid: workspaceID)
+
+        let result = coordinator.handleSocketWorkerV2(
+            ControlRequest(
+                id: .int(4),
+                method: "sidebar.set_status",
+                params: [
+                    "workspace_id": .string(workspaceRef),
+                    "key": .string("agent"),
+                    "value": .string("Working"),
+                    "icon": .string("bolt.fill"),
+                    "color": .string("#4C8DFF"),
+                    "priority": .string("90"),
+                ]
+            ),
+            context: context
+        )
+
+        #expect(result == .ok(.object([
+            "workspace_id": .string(workspaceID.uuidString),
+            "key": .string("agent"),
+        ])))
+        #expect(context.statusUpsertCall?.target == .workspace(workspaceID))
+        #expect(context.statusUpsertCall?.key == "agent")
+        #expect(context.statusUpsertCall?.value == "Working")
+    }
+
     @Test func agentPIDClearForwardsOwnedKeyRequirement() {
         let context = FakeSidebarV1ControlCommandContext()
         let coordinator = ControlCommandCoordinator(context: context)

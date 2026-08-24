@@ -223205,6 +223205,30 @@
         }
       }
     },
+    "sidebar.prompt_launcher.autoTarget": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Auto target"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "自動ターゲット"
+          }
+        }
+      }
+    },
+    "sidebar.prompt_launcher.autoTargetHelp": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Reset to the default target and repository" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "既定のターゲットとリポジトリに戻す" } }
+      }
+    },
     "sidebar.prompt_launcher.repository": {
       "extractionState": "manual",
       "localizations": {
@@ -225135,6 +225159,13 @@
       "localizations": {
         "en": { "stringUnit": { "state": "translated", "value": "Restart Session" } },
         "ja": { "stringUnit": { "state": "translated", "value": "セッションを再起動" } }
+      }
+    },
+    "sidebar.sessionCard.restarting": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Restarting Session…" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "セッションを再起動中…" } }
       }
     },
     "sidebar.sessionCard.restartUnavailable": {

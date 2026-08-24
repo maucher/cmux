@@ -282,16 +282,19 @@ import CmuxSidebar
 
         let message = errorMessage?.trimmingCharacters(in: .whitespacesAndNewlines)
         let latestLine = job.latestLine.trimmingCharacters(in: .whitespacesAndNewlines)
+        let launchProcessFailed = (exitStatus != nil && exitStatus != 0) || (message?.isEmpty == false)
         if let workspaceID = job.workspaceID,
            let workspace = tabManager.tabs.first(where: { $0.id == workspaceID }) {
-            workspace.statusEntries["workflow"] = SidebarStatusEntry(
-                key: "workflow",
-                value: String(localized: "sidebar.sessionGroup.needsAttention", defaultValue: "Needs Attention"),
-                icon: "exclamationmark.triangle.fill",
-                color: "#E74C3C",
-                priority: 100,
-                timestamp: Date()
-            )
+            if launchProcessFailed {
+                workspace.statusEntries["workflow"] = SidebarStatusEntry(
+                    key: "workflow",
+                    value: String(localized: "sidebar.sessionGroup.needsAttention", defaultValue: "Needs Attention"),
+                    icon: "exclamationmark.triangle.fill",
+                    color: "#E74C3C",
+                    priority: 100,
+                    timestamp: Date()
+                )
+            }
             jobs.removeAll { $0.id == jobID }
             return
         }
@@ -404,12 +407,18 @@ import CmuxSidebar
             if let uuid = UUID(uuidString: suffix) {
                 return tabManager.tabs.first(where: { $0.id == uuid })
             }
-            if let index = Int(suffix), index > 0, index <= tabManager.tabs.count {
-                return tabManager.tabs[index - 1]
-            }
         }
-        if let index = Int(handle), index > 0, index <= tabManager.tabs.count {
-            return tabManager.tabs[index - 1]
+        // "workspace:N" is a control-socket handle whose N is a global,
+        // mint-ordered ordinal from ControlHandleRegistry — NOT a position in
+        // this window's tab list. Resolve it through the same registry the
+        // socket/CLI use. There is deliberately no positional fallback: the
+        // old tabs[N-1] interpretation renamed whatever tab happened to sit
+        // at that index (issue: launching a known-branch session retitled an
+        // unrelated local workspace). An unresolved handle returns nil and
+        // the job simply stays unbound until a resolvable metadata line
+        // arrives.
+        if let uuid = TerminalController.shared.controlCommandCoordinator.resolveRef(handle) {
+            return tabManager.tabs.first(where: { $0.id == uuid })
         }
         return nil
     }

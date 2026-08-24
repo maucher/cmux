@@ -3073,6 +3073,11 @@ struct TextBoxInputView: NSViewRepresentable {
         textView.delegate = context.coordinator
         textView.onMoveToWindow = onTextViewMovedToWindow
         textView.isRichText = true
+        textView.isAutomaticLinkDetectionEnabled = true
+        textView.linkTextAttributes = [
+            .foregroundColor: NSColor.linkColor,
+            .underlineStyle: NSUnderlineStyle.single.rawValue,
+        ]
         textView.isAutomaticQuoteSubstitutionEnabled = false
         textView.isAutomaticDashSubstitutionEnabled = false
         textView.isAutomaticTextReplacementEnabled = false
