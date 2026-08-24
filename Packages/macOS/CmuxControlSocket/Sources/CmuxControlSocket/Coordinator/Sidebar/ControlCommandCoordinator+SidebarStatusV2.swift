@@ -6,17 +6,18 @@ extension ControlCommandCoordinator {
     /// mutation itself uses the same ordered sidebar bus as the v1 commands.
     nonisolated func handleSidebarStatusV2(
         _ request: ControlRequest,
-        context: (any ControlCommandContext)?
+        context: (any ControlCommandContext)?,
+        handles: ControlHandleRegistry
     ) -> ControlCallResult? {
         switch request.method {
         case "sidebar.set_status":
-            return sidebarSetStatusV2(request.params, context: context)
+            return sidebarSetStatusV2(request.params, context: context, handles: handles)
         case "sidebar.clear_status":
-            return sidebarClearStatusV2(request.params, context: context)
+            return sidebarClearStatusV2(request.params, context: context, handles: handles)
         case "surface.report_pull_request":
-            return sidebarReportPullRequestV2(request.params, context: context)
+            return sidebarReportPullRequestV2(request.params, context: context, handles: handles)
         case "surface.clear_pull_request":
-            return sidebarClearPullRequestV2(request.params, context: context)
+            return sidebarClearPullRequestV2(request.params, context: context, handles: handles)
         default:
             return nil
         }
@@ -24,9 +25,10 @@ extension ControlCommandCoordinator {
 
     private nonisolated func sidebarSetStatusV2(
         _ params: [String: JSONValue],
-        context: (any ControlCommandContext)?
+        context: (any ControlCommandContext)?,
+        handles: ControlHandleRegistry
     ) -> ControlCallResult {
-        guard let workspaceID = string(params, "workspace_id").flatMap(UUID.init(uuidString:)) else {
+        guard let workspaceID = socketWorkerUUID(params, "workspace_id", handles: handles) else {
             return .err(code: "invalid_params", message: "Missing or invalid workspace_id", data: nil)
         }
         guard let key = string(params, "key") else {
@@ -93,9 +95,10 @@ extension ControlCommandCoordinator {
 
     private nonisolated func sidebarClearStatusV2(
         _ params: [String: JSONValue],
-        context: (any ControlCommandContext)?
+        context: (any ControlCommandContext)?,
+        handles: ControlHandleRegistry
     ) -> ControlCallResult {
-        guard let workspaceID = string(params, "workspace_id").flatMap(UUID.init(uuidString:)) else {
+        guard let workspaceID = socketWorkerUUID(params, "workspace_id", handles: handles) else {
             return .err(code: "invalid_params", message: "Missing or invalid workspace_id", data: nil)
         }
         guard let key = string(params, "key") else {
@@ -124,12 +127,13 @@ extension ControlCommandCoordinator {
 
     private nonisolated func sidebarReportPullRequestV2(
         _ params: [String: JSONValue],
-        context: (any ControlCommandContext)?
+        context: (any ControlCommandContext)?,
+        handles: ControlHandleRegistry
     ) -> ControlCallResult {
-        guard let workspaceID = string(params, "workspace_id").flatMap(UUID.init(uuidString:)) else {
+        guard let workspaceID = socketWorkerUUID(params, "workspace_id", handles: handles) else {
             return .err(code: "invalid_params", message: "Missing or invalid workspace_id", data: nil)
         }
-        guard let surfaceID = string(params, "surface_id").flatMap(UUID.init(uuidString:)) else {
+        guard let surfaceID = socketWorkerUUID(params, "surface_id", handles: handles) else {
             return .err(code: "invalid_params", message: "Missing or invalid surface_id", data: nil)
         }
         let number: Int?
@@ -172,12 +176,13 @@ extension ControlCommandCoordinator {
 
     private nonisolated func sidebarClearPullRequestV2(
         _ params: [String: JSONValue],
-        context: (any ControlCommandContext)?
+        context: (any ControlCommandContext)?,
+        handles: ControlHandleRegistry
     ) -> ControlCallResult {
-        guard let workspaceID = string(params, "workspace_id").flatMap(UUID.init(uuidString:)) else {
+        guard let workspaceID = socketWorkerUUID(params, "workspace_id", handles: handles) else {
             return .err(code: "invalid_params", message: "Missing or invalid workspace_id", data: nil)
         }
-        guard let surfaceID = string(params, "surface_id").flatMap(UUID.init(uuidString:)) else {
+        guard let surfaceID = socketWorkerUUID(params, "surface_id", handles: handles) else {
             return .err(code: "invalid_params", message: "Missing or invalid surface_id", data: nil)
         }
         guard let context else {

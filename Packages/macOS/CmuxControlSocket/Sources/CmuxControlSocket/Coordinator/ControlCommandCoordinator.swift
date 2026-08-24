@@ -40,7 +40,7 @@ public final class ControlCommandCoordinator {
     /// not UI state, and tracking it would invalidate any observer on every
     /// socket command.
     @ObservationIgnored
-    public var handles: ControlHandleRegistry
+    nonisolated(unsafe) public var handles: ControlHandleRegistry
 
     @ObservationIgnored
     nonisolated let simulatorOperationAdmissionGate =
@@ -86,7 +86,7 @@ public final class ControlCommandCoordinator {
         if let result = handleSystem(request) { return result }
         if let result = handleProject(request) { return result }
         if let result = handleDebug(request) { return result }
-        if let result = handleSidebarStatusV2(request, context: context) { return result }
+        if let result = handleSidebarStatusV2(request, context: context, handles: handles) { return result }
         // The v2 browser.* domain stays app-side: PR 5778 moved its
         // JS-evaluating methods onto the socket-worker lane (nonisolated
         // bodies + v2MainSync), which the @MainActor coordinator seam cannot
@@ -121,7 +121,7 @@ public final class ControlCommandCoordinator {
         _ request: ControlRequest,
         context: (any ControlCommandContext)?
     ) -> ControlCallResult? {
-        if let result = handleSidebarStatusV2(request, context: context) {
+        if let result = handleSidebarStatusV2(request, context: context, handles: handles) {
             return result
         }
         switch request.method {
@@ -247,6 +247,16 @@ public final class ControlCommandCoordinator {
     /// A UUID param, accepting either a UUID string or a `kind:N` ref resolved
     /// through the handle registry (matches legacy `v2UUID`).
     func uuid(_ params: [String: JSONValue], _ key: String) -> UUID? {
+        socketWorkerUUID(params, key, handles: handles)
+    }
+
+    /// Worker-lane twin of ``uuid(_:_:)``: pure param read plus handle-registry
+    /// lookup without requiring a main-actor hop.
+    nonisolated func socketWorkerUUID(
+        _ params: [String: JSONValue],
+        _ key: String,
+        handles: ControlHandleRegistry
+    ) -> UUID? {
         guard let raw = string(params, key) else { return nil }
         if let parsed = UUID(uuidString: raw) {
             return parsed

@@ -213,6 +213,26 @@ class TabManager: ObservableObject {
         guard sidebarVisibleOrder != workspaceIds else { return }
         sidebarVisibleOrder = workspaceIds
     }
+
+    /// Top-to-bottom sidebar order from the same status-group projection the
+    /// sidebar renders. Collapsed groups are ignored so keyboard cycling can
+    /// reach every session regardless of renderer or sidebar visibility.
+    private func groupedSidebarWorkspaceOrder() -> [UUID] {
+        let configuredGroups = cmuxConfigStore?.sessionStatusGroups ?? []
+        let sessionGroups = SessionCardGroup.groups(configured: configuredGroups)
+        let sessionRows = tabs.map {
+            SidebarSessionRowSnapshot(
+                workspace: $0,
+                status: SessionCardSnapshot.Status.resolve(workspace: $0),
+                groups: configuredGroups
+            )
+        }
+        return SidebarSessionListItem.renderItems(
+            groups: sessionGroups,
+            rows: sessionRows,
+            collapsedGroupIDs: []
+        ).visibleWorkspaceIDs
+    }
     /// Named groupings of workspaces shown as collapsible sections in the sidebar.
     /// Group order in this array defines section order in the sidebar.
     /// Each member workspace stores its `groupId` on the `Workspace` model.
@@ -3845,7 +3865,11 @@ class TabManager: ObservableObject {
         let destinationId: UUID?
         switch scope {
         case .window:
-            let visible = sidebarVisibleOrder.filter { workspacesById[$0] != nil }
+            let groupedOrder = groupedSidebarWorkspaceOrder()
+                .filter { workspacesById[$0] != nil }
+            let visible = groupedOrder.isEmpty
+                ? sidebarVisibleOrder.filter { workspacesById[$0] != nil }
+                : groupedOrder
             if visible.isEmpty {
                 destinationId = workspaces.cycleDestination(
                     from: currentId,

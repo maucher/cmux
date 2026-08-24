@@ -1,4 +1,5 @@
 import AppKit
+import CmuxFoundation
 import SwiftUI
 
 private struct PromptLauncherArrowCursorArea: NSViewRepresentable {
@@ -285,12 +286,20 @@ private struct PromptLauncherOperationCard: View {
     let onRetry: () -> Void
     let onDismiss: () -> Void
 
+    private func renderedMarkdown(_ markdown: String) -> Text {
+        guard let rendered = SidebarMarkdownRenderer(markdown: markdown).workspaceDescription else {
+            return Text(markdown)
+        }
+        let styled = rendered.applyingSidebarRowLinkPolicy(activeForegroundColor: nil)
+        return Text(styled)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 7) {
                 Image(systemName: isFailed ? "exclamationmark.triangle.fill" : icon)
                     .foregroundStyle(isFailed ? Color.red : Color.accentColor)
-                Text(title)
+                renderedMarkdown(title)
                     .font(.system(size: 11, weight: .semibold))
                     .lineLimit(2)
                 Spacer(minLength: 0)
@@ -301,7 +310,7 @@ private struct PromptLauncherOperationCard: View {
                 }
             }
 
-            Text(detail)
+            renderedMarkdown(detail)
                 .font(.system(size: 10))
                 .foregroundStyle(isFailed ? Color.red : Color.secondary)
                 .lineLimit(2)

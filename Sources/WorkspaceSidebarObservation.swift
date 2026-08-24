@@ -171,6 +171,7 @@ private struct SidebarImmediateObservationState: Equatable {
     let taskStatusOverride: WorkspaceTaskStatusOverride?
     let statusHidden: Bool
     let checklist: [WorkspaceChecklistItem]
+    let isSessionRestartingFromCard: Bool
 }
 
 private struct SidebarObservationState: Equatable {
@@ -226,10 +227,11 @@ extension Workspace {
             todoState.$statusHidden,
             todoState.$checklist
         )
+        let restartFields = $isSessionRestartingFromCard
 
         let immediateFields = workspaceFields
-            .combineLatest(conversationFields, todoFields)
-            .map { workspaceFields, conversationFields, todoFields in
+            .combineLatest(conversationFields, todoFields, restartFields)
+            .map { workspaceFields, conversationFields, todoFields, isSessionRestartingFromCard in
                 SidebarImmediateObservationState(
                     customTitle: workspaceFields.0,
                     customDescription: workspaceFields.1,
@@ -240,7 +242,8 @@ extension Workspace {
                     latestSubmittedAt: conversationFields.2,
                     taskStatusOverride: todoFields.0,
                     statusHidden: todoFields.1,
-                    checklist: todoFields.2
+                    checklist: todoFields.2,
+                    isSessionRestartingFromCard: isSessionRestartingFromCard
                 )
             }
             .removeDuplicates()

@@ -277,6 +277,53 @@ final class TabManagerChildExitCloseTests: XCTestCase {
         XCTAssertEqual(manager.selectedTabId, last.id)
     }
 
+    func testTabCyclingFollowsGroupedSidebarOrderWithoutVisibleOrderFeed() throws {
+        let manager = TabManager()
+        let defaultWorkspace = manager.tabs[0]
+        let pinnedWorkspace = manager.addWorkspace()
+        let runningWorkspace = manager.addWorkspace()
+        let finishedWorkspace = manager.addWorkspace()
+
+        pinnedWorkspace.isPinned = true
+        let pinnedPanelID = try XCTUnwrap(pinnedWorkspace.focusedPanelId)
+        pinnedWorkspace.setAgentLifecycle(key: "codex", panelId: pinnedPanelID, lifecycle: .running)
+
+        let runningPanelID = try XCTUnwrap(runningWorkspace.focusedPanelId)
+        runningWorkspace.setAgentLifecycle(key: "codex", panelId: runningPanelID, lifecycle: .running)
+
+        let finishedPanelID = try XCTUnwrap(finishedWorkspace.focusedPanelId)
+        finishedWorkspace.setAgentLifecycle(key: "codex", panelId: finishedPanelID, lifecycle: .idle)
+
+        manager.selectWorkspace(defaultWorkspace)
+        manager.selectNextTab()
+        XCTAssertEqual(
+            manager.selectedTabId,
+            finishedWorkspace.id,
+            "Cycling should follow grouped sidebar order (finished after default), not flat tab order"
+        )
+
+        manager.selectPreviousTab()
+        XCTAssertEqual(
+            manager.selectedTabId,
+            defaultWorkspace.id,
+            "Previous should move up grouped sidebar order to the prior finished row"
+        )
+
+        manager.selectPreviousTab()
+        XCTAssertEqual(
+            manager.selectedTabId,
+            runningWorkspace.id,
+            "Previous should reach the running section in grouped order"
+        )
+
+        manager.selectPreviousTab()
+        XCTAssertEqual(
+            manager.selectedTabId,
+            pinnedWorkspace.id,
+            "Previous should reach the pinned section before flat tab order would"
+        )
+    }
+
     func testChildExitOnLastPanelClosesSelectedWorkspaceAndKeepsIndexStable() {
         let manager = TabManager()
         let first = manager.tabs[0]

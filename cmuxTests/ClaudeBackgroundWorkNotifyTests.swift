@@ -87,6 +87,19 @@ struct ClaudeBackgroundWorkNotifyTests {
         #expect(lifecycleLine(snapshot, value: "idle") == nil)
     }
 
+    @Test func stopWithPendingBackgroundTaskStatusTagsPending() throws {
+        let session = "bg-pending-session"
+        let stdin = #"""
+        {"session_id":"\#(session)","cwd":"/tmp/x","hook_event_name":"Stop","last_assistant_message":"ok","background_tasks":[{"id":"t1","type":"shell","status":"pending","description":"build","command":"sleep 1"}],"session_crons":[]}
+        """#
+        let (snapshot, cached) = try runStopHook(name: "bg-pending", sessionId: session, stdin: stdin)
+        #expect(notifyLine(snapshot, containing: "c=turn-complete;p=1") != nil,
+                "Non-terminal background task status must tag pending=1; saw \(snapshot)")
+        #expect(cached == true)
+        #expect(lifecycleLine(snapshot, value: "running") != nil,
+                "Pending background task must keep a running lifecycle; saw \(snapshot)")
+    }
+
     @Test func stopWithEmptyArraysTagsIdleAndCachesFalse() throws {
         let session = "bg-empty-session"
         let stdin = #"""
