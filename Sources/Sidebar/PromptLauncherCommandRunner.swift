@@ -29,12 +29,17 @@ struct PromptLauncherProcessRunner: PromptLauncherCommandRunning {
         environment: [String: String],
         forwardedSocketPath: String?
     ) async -> AsyncStream<PromptLauncherCommandEvent> {
-        AsyncStream { continuation in
+        let launchEnvironment = PromptLauncherEnvironment(
+            inherited: ProcessInfo.processInfo.environment,
+            bundledCLIPath: Bundle.main.resourceURL?.appendingPathComponent("bin/cmux").path,
+            bundleIdentifier: Bundle.main.bundleIdentifier,
+            bundleTag: (Bundle.main.object(forInfoDictionaryKey: "LSEnvironment") as? [String: String])?["CMUX_TAG"]
+        ).merging(environment, forwardedSocketPath: forwardedSocketPath)
+        return AsyncStream { continuation in
             let state = ProcessState(continuation: continuation)
             state.start(
                 shellCommand: shellCommand,
-                environment: environment,
-                forwardedSocketPath: forwardedSocketPath
+                environment: launchEnvironment
             )
         }
     }
@@ -56,19 +61,13 @@ struct PromptLauncherProcessRunner: PromptLauncherCommandRunning {
 
         func start(
             shellCommand: String,
-            environment: [String: String],
-            forwardedSocketPath: String?
+            environment: [String: String]
         ) {
             let process = Process()
             process.executableURL = URL(fileURLWithPath: "/bin/zsh")
             process.arguments = ["-l", "-c", shellCommand]
 
-            var processEnvironment = ProcessInfo.processInfo.environment
-            processEnvironment.merge(environment) { _, configuredValue in configuredValue }
-            if let forwardedSocketPath {
-                processEnvironment["CMUX_SOCKET_PATH"] = forwardedSocketPath
-            }
-            process.environment = processEnvironment
+            process.environment = environment
             process.standardInput = FileHandle.nullDevice
 
             let pipe = Pipe()

@@ -281,6 +281,7 @@ struct SessionCardSnapshot: Equatable {
     let isPinned: Bool
     let diff: Diff
     let isRestarting: Bool
+    let initializationDetail: String?
 
     init(
         workspaceNumber: Int,
@@ -295,7 +296,8 @@ struct SessionCardSnapshot: Equatable {
         isPinned: Bool = false,
         diff: Diff,
         badge: Badge? = nil,
-        isRestarting: Bool = false
+        isRestarting: Bool = false,
+        initializationDetail: String? = nil
     ) {
         self.workspaceNumber = min(10, max(1, workspaceNumber))
         self.badge = badge ?? .indexedWorktree(self.workspaceNumber)
@@ -310,6 +312,7 @@ struct SessionCardSnapshot: Equatable {
         self.isPinned = isPinned
         self.diff = diff
         self.isRestarting = isRestarting
+        self.initializationDetail = initializationDetail
     }
 
     private static func nonEmpty(_ value: String?) -> String? {

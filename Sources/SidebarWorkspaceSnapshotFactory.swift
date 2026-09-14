@@ -171,7 +171,8 @@ struct SidebarWorkspaceSnapshotFactory {
                 deleted: SessionCardSnapshot.Diff.parseCount(deleted)
             ),
             badge: badge,
-            isRestarting: workspace.isSessionRestartingFromCard
+            isRestarting: workspace.isSessionRestartingFromCard,
+            initializationDetail: workspace.statusEntries["launcher.initialization"]?.value
         )
     }
 

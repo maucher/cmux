@@ -19,6 +19,12 @@ struct SessionCard: View {
 
             VStack(alignment: .leading, spacing: 5) {
                 topRow
+                if let detail = snapshot.initializationDetail {
+                    Text(detail)
+                        .font(.system(size: scaled(10)))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
                 if !snapshot.pullRequests.isEmpty {
                     pullRequestRows
                 }
@@ -284,10 +290,12 @@ struct SessionCard: View {
         let color = snapshot.isPinned
             ? hexColor("#8A8A95")
             : SessionCardColor.color(hex: snapshot.status.colorHex, fallbackHex: "#8A8A95")
-        let label = snapshot.isPinned
+        let label = snapshot.initializationDetail != nil
+            ? String(localized: "sidebar.prompt_launcher.initializing", defaultValue: "Initializing")
+            : snapshot.isPinned
             ? String(localized: "sidebar.sessionCard.status.pinned", defaultValue: "Pinned")
             : snapshot.status.displayName
-        let iconName = snapshot.isPinned ? "pin" : snapshot.status.iconName
+        let iconName = snapshot.initializationDetail != nil ? "hourglass" : snapshot.isPinned ? "pin" : snapshot.status.iconName
 
         return HStack(spacing: 4) {
             if let iconName {

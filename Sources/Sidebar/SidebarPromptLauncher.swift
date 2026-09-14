@@ -37,37 +37,12 @@ private struct SpinningCircleButton: View {
     }
 }
 
-/// Chrome for the launcher row's Auto reset button: 32pt height matching the
-/// adjacent pickers, accent-tinted while the default target+repository are
-/// selected.
-private struct PromptLauncherControlChrome<Content: View>: View {
-    let isActive: Bool
-    @ViewBuilder let content: Content
-
-    var body: some View {
-        content
-            .frame(height: 32)
-            .padding(.horizontal, 9)
-            .background(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(isActive ? Color.accentColor.opacity(0.16) : Color.primary.opacity(0.06))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .strokeBorder(
-                        isActive ? Color.accentColor.opacity(0.4) : Color.primary.opacity(0.12),
-                        lineWidth: 1
-                    )
-            )
-            .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-    }
-}
-
 struct SidebarPromptLauncher: View {
     @EnvironmentObject var tabManager: TabManager
     @EnvironmentObject var cmuxConfigStore: CmuxConfigStore
 
-    private static let controlHeight: CGFloat = 32
+    private static let accent = Color(red: 75 / 255, green: 123 / 255, blue: 1)
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         @Bindable var model = tabManager.promptLauncherModel
@@ -77,135 +52,126 @@ struct SidebarPromptLauncher: View {
                     ? model.selectedRepository
                     : config.selectedDefaultRepositoryID
                 let availableTargets = config.targets(forRepositoryID: repositoryID)
-                let targetID = availableTargets.contains(where: { $0.id == model.selectedTarget })
+                let targetID = config.targets.contains(where: { $0.id == model.selectedTarget })
                     ? model.selectedTarget
                     : config.selectedDefaultTargetID(forRepositoryID: repositoryID)
                 let providerID = config.providers.contains(where: { $0.id == model.selectedProvider })
                     ? model.selectedProvider
                     : config.selectedDefaultProviderID
                 let defaultTargetID = config.selectedDefaultTargetID(forRepositoryID: config.selectedDefaultRepositoryID)
-                let defaultTargetTitle = availableTargets.first(where: { $0.id == defaultTargetID })?.title
-                    ?? config.targets(forRepositoryID: config.selectedDefaultRepositoryID)
-                        .first(where: { $0.id == defaultTargetID })?.title
-                    ?? defaultTargetID
                 let isOnDefaultTarget = targetID == defaultTargetID
                     && repositoryID == config.selectedDefaultRepositoryID
 
-                VStack(alignment: .leading, spacing: 4) {
-                    PromptTextEditorContainer(
-                        text: $model.promptText,
-                        placeholder: String(localized: "sidebar.prompt_launcher.placeholder",
-                                            defaultValue: "Prompt\u{2026}"),
-                        isEditable: true,
-                        onSubmit: {
-                            model.launch(
-                                config: config,
-                                tabManager: tabManager,
-                                configSourcePath: cmuxConfigStore.promptLauncherSourcePath,
-                                globalConfigPath: cmuxConfigStore.globalConfigPath
-                            )
-                        }
+                let isTargetSupported = model.isTargetSupported(config)
+                let canSend = isTargetSupported
+                    && !model.promptText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                let submit = {
+                    model.launch(
+                        config: config,
+                        tabManager: tabManager,
+                        configSourcePath: cmuxConfigStore.promptLauncherSourcePath,
+                        globalConfigPath: cmuxConfigStore.globalConfigPath
                     )
-                    .frame(height: 120)
+                }
 
-                    HStack(spacing: 6) {
-                        // Pure reset, never sends: back to the default target
-                        // (auto) and default repository, keeping the provider.
-                        Button {
-                            model.selectedTarget = defaultTargetID
-                            model.selectRepository(config.selectedDefaultRepositoryID, config: config)
-                        } label: {
-                            PromptLauncherControlChrome(isActive: isOnDefaultTarget) {
-                                HStack(spacing: 4) {
-                                    Image(systemName: "bolt.fill")
-                                        .font(.system(size: 9, weight: .semibold))
-                                    Text(defaultTargetTitle)
-                                        .font(.system(size: 10, weight: .semibold))
-                                        .lineLimit(1)
-                                }
-                            }
-                        }
-                        .buttonStyle(.plain)
-                        .help(String(localized: "sidebar.prompt_launcher.autoTargetHelp",
-                                     defaultValue: "Reset to the default target and repository"))
-                        .accessibilityLabel(
-                            String(localized: "sidebar.prompt_launcher.autoTarget", defaultValue: "Auto target")
-                        )
-
-                        Picker(
-                            selection: Binding(
-                                get: { targetID },
-                                set: { model.selectedTarget = $0 }
-                            ),
-                            label: EmptyView()
-                        ) {
-                            ForEach(availableTargets, id: \.id) { target in
-                                Text(target.title).font(.system(size: 10)).tag(target.id)
-                            }
-                        }
-                        .controlSize(.small)
-                        .frame(height: Self.controlHeight)
-                        .frame(maxWidth: .infinity)
-
-                        Picker(
-                            selection: Binding(
-                                get: { providerID },
-                                set: { model.selectedProvider = $0 }
-                            ),
-                            label: EmptyView()
-                        ) {
-                            ForEach(config.providers, id: \.id) { provider in
-                                Text(provider.title).font(.system(size: 10)).tag(provider.id)
-                            }
-                        }
-                        .controlSize(.small)
-                        .frame(height: Self.controlHeight)
-                        .frame(maxWidth: .infinity)
-
-                        if !config.repositories.isEmpty {
-                            Picker(
-                                selection: Binding(
-                                    get: { repositoryID },
-                                    set: { model.selectRepository($0, config: config) }
-                                ),
-                                label: EmptyView()
-                            ) {
-                                ForEach(config.repositories, id: \.id) { repository in
-                                    Text(repository.title).font(.system(size: 10)).tag(repository.id)
-                                }
-                            }
-                            .controlSize(.small)
-                            .frame(height: Self.controlHeight)
-                            .frame(maxWidth: .infinity)
-                            .accessibilityLabel(
-                                String(localized: "sidebar.prompt_launcher.repository", defaultValue: "Repository")
-                            )
-                        }
-
-                        Button {
-                            model.launch(
-                                config: config,
-                                tabManager: tabManager,
-                                configSourcePath: cmuxConfigStore.promptLauncherSourcePath,
-                                globalConfigPath: cmuxConfigStore.globalConfigPath
-                            )
-                        } label: {
-                            ZStack {
-                                Circle()
-                                    .fill(Color.accentColor)
-                                    .frame(width: Self.controlHeight, height: Self.controlHeight)
-                                Image(systemName: "arrow.up")
-                                    .font(.system(size: 11, weight: .bold))
-                                    .foregroundColor(.white)
-                            }
-                        }
-                        .buttonStyle(.plain)
-                        .keyboardShortcut(.return, modifiers: [.command])
-                        .disabled(model.promptText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                        .accessibilityLabel(String(localized: "sidebar.prompt_launcher.send",
-                                                   defaultValue: "Send"))
+                let autoControl = Button {
+                    model.resetDestination(config)
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "bolt.fill")
+                            .font(.system(size: 9, weight: .semibold))
+                        Text(isOnDefaultTarget
+                             ? String(localized: "sidebar.prompt_launcher.auto", defaultValue: "Auto")
+                             : String(localized: "sidebar.prompt_launcher.custom", defaultValue: "Custom"))
+                            .font(.system(size: 11, weight: .semibold))
                     }
-                    .overlay(PromptLauncherArrowCursorArea())
+                    .foregroundStyle(isOnDefaultTarget ? Color.white : Color.secondary)
+                    .padding(.horizontal, 10)
+                    .frame(height: 26)
+                    .background(isOnDefaultTarget ? Self.accent : Color.primary.opacity(0.06), in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .fixedSize()
+                .help(String(localized: "sidebar.prompt_launcher.autoTargetHelp",
+                             defaultValue: "Reset to the default target and repository"))
+                .accessibilityLabel(
+                    String(localized: "sidebar.prompt_launcher.autoTarget", defaultValue: "Auto target")
+                )
+                .accessibilityValue(isOnDefaultTarget
+                    ? String(localized: "sidebar.prompt_launcher.auto", defaultValue: "Auto")
+                    : String(localized: "sidebar.prompt_launcher.custom", defaultValue: "Custom"))
+                let shortcutHint = Text(String(localized: "sidebar.prompt_launcher.sendHint", defaultValue: "⌘↵ to send"))
+                    .font(.system(size: 9))
+                    .foregroundStyle(.secondary)
+                    .fixedSize()
+                let environmentControl = targetMenu(
+                    choices: config.targets,
+                    enabledIDs: Set(availableTargets.map(\.id)),
+                    selectedID: targetID
+                ) {
+                    model.selectedTarget = $0
+                }
+                let agentControl = providerMenu(choices: config.providers, selectedID: providerID) {
+                    model.selectedProvider = $0
+                }
+                let repositoryControl = repositoryMenu(choices: config.repositories, selectedID: repositoryID) {
+                    model.selectRepository($0)
+                }
+                let sendControl = sendButton(isEnabled: canSend, action: submit)
+
+                VStack(alignment: .leading, spacing: 10) {
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 8) {
+                            autoControl
+                            Spacer(minLength: 0)
+                            shortcutHint
+                        }
+                        VStack(alignment: .leading, spacing: 4) {
+                            autoControl
+                            shortcutHint
+                        }
+                    }
+
+                    VStack(spacing: 8) {
+                        PromptTextEditorContainer(
+                            text: $model.promptText,
+                            placeholder: String(localized: "sidebar.prompt_launcher.placeholder",
+                                                defaultValue: "What should the agent do?"),
+                            isEditable: true,
+                            onSubmit: submit
+                        )
+                        .frame(height: 104)
+
+                        HStack(spacing: 6) {
+                            environmentControl
+                                .frame(minWidth: 0, maxWidth: 62)
+                            agentControl
+                                .frame(minWidth: 0, maxWidth: 66)
+                            if !config.repositories.isEmpty { repositoryControl }
+                            sendControl.fixedSize()
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .overlay(PromptLauncherArrowCursorArea())
+
+                        if !isTargetSupported {
+                            Text(String(
+                                localized: "sidebar.prompt_launcher.unsupportedEnvironment",
+                                defaultValue: "Choose an environment supported by this repository."
+                            ))
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                    .padding(8)
+                    .background(
+                        colorScheme == .dark ? Color(white: 0.075) : Color(NSColor.textBackgroundColor),
+                        in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    )
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .strokeBorder(Color.primary.opacity(0.12), lineWidth: 1)
+                    }
 
                     ForEach(model.visibleJobs) { job in
                         PromptLauncherPendingCard(
@@ -242,6 +208,104 @@ struct SidebarPromptLauncher: View {
             }
         }
     }
+
+    private func targetMenu(
+        choices: [CmuxPromptLauncherChoice], enabledIDs: Set<String>,
+        selectedID: String, select: @escaping (String) -> Void
+    ) -> some View {
+        choiceMenu(
+            title: String(localized: "sidebar.prompt_launcher.environmentLabel", defaultValue: "ENV"),
+            choices: choices, selectedID: selectedID, enabledIDs: enabledIDs, select: select
+        )
+    }
+
+    private func providerMenu(
+        choices: [CmuxPromptLauncherChoice], selectedID: String, select: @escaping (String) -> Void
+    ) -> some View {
+        choiceMenu(
+            title: String(localized: "sidebar.prompt_launcher.agentLabel", defaultValue: "AGENT"),
+            choices: choices, selectedID: selectedID, select: select
+        )
+    }
+
+    private func repositoryMenu(
+        choices: [CmuxPromptLauncherChoice], selectedID: String, select: @escaping (String) -> Void
+    ) -> some View {
+        choiceMenu(
+            title: String(localized: "sidebar.prompt_launcher.repoLabel", defaultValue: "REPO"),
+            choices: choices, selectedID: selectedID, select: select
+        )
+    }
+
+    private func choiceMenu(
+        title: String,
+        choices: [CmuxPromptLauncherChoice],
+        selectedID: String,
+        enabledIDs: Set<String>? = nil,
+        select: @escaping (String) -> Void
+    ) -> some View {
+        let selectedTitle = choices.first { $0.id == selectedID }?.title ?? selectedID
+        return Menu {
+            Picker(title, selection: Binding(get: { selectedID }, set: select)) {
+                ForEach(choices) { choice in
+                    Text(choice.title).tag(choice.id)
+                        .disabled(enabledIDs.map { !$0.contains(choice.id) } ?? false)
+                }
+            }
+            .pickerStyle(.inline)
+        } label: {
+            VStack(alignment: .leading, spacing: 1) {
+                HStack(spacing: 4) {
+                    Text(title)
+                        .font(.system(size: 9, weight: .semibold))
+                        .tracking(0.6)
+                        .lineLimit(1)
+                        .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 8, weight: .medium))
+                }
+                .foregroundStyle(.secondary)
+                Text(selectedTitle)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            .padding(.horizontal, 6)
+            .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+            .frame(height: 34)
+            .clipped()
+            .background(Color.primary.opacity(0.055), in: RoundedRectangle(cornerRadius: 8))
+            .overlay {
+                RoundedRectangle(cornerRadius: 8)
+                    .strokeBorder(Color.primary.opacity(0.09), lineWidth: 1)
+            }
+            .contentShape(RoundedRectangle(cornerRadius: 8))
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .frame(minWidth: 0, maxWidth: .infinity)
+        .help(selectedTitle)
+        .accessibilityLabel(title)
+        .accessibilityValue(selectedTitle)
+    }
+
+    private func sendButton(isEnabled: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: "arrow.up")
+                .font(.system(size: 14, weight: .bold))
+                .foregroundStyle(isEnabled ? Color.white : Color.secondary.opacity(0.6))
+                .frame(width: 30, height: 30)
+                .background(isEnabled ? Self.accent : Color.primary.opacity(0.08), in: Circle())
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .keyboardShortcut(.return, modifiers: [.command])
+        .disabled(!isEnabled)
+        .accessibilityLabel(String(localized: "sidebar.prompt_launcher.send", defaultValue: "Send"))
+    }
+
 }
 
 private struct PromptLauncherPendingCard: View {
@@ -251,7 +315,7 @@ private struct PromptLauncherPendingCard: View {
 
     var body: some View {
         PromptLauncherOperationCard(
-            title: job.prompt,
+            title: job.displayTitle,
             detail: job.latestLine,
             isFailed: job.state == .failed,
             icon: "sparkles",
