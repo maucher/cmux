@@ -1,6 +1,20 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "sidebar.prompt_launcher.creatingSession": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Creating session" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "セッションを作成中" } }
+      }
+    },
+    "sidebar.prompt_launcher.initializing": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Initializing" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "初期化中" } }
+      }
+    },
     "caffeine.error.missingEnabled": {
       "extractionState": "manual",
       "localizations": {
@@ -223188,19 +223202,32 @@
     "sidebar.prompt_launcher.close_failed": { "extractionState": "manual", "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Workspace cleanup failed" } }, "ja": { "stringUnit": { "state": "translated", "value": "ワークスペースのクリーンアップに失敗しました" } } } },
     "sidebar.prompt_launcher.retry": { "extractionState": "manual", "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Retry" } }, "ja": { "stringUnit": { "state": "translated", "value": "再試行" } } } },
     "sidebar.prompt_launcher.dismiss": { "extractionState": "manual", "localizations": { "en": { "stringUnit": { "state": "translated", "value": "Dismiss" } }, "ja": { "stringUnit": { "state": "translated", "value": "閉じる" } } } },
+    "sidebar.prompt_launcher.auto": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Auto"}}, "ja": {"stringUnit": {"state": "translated", "value": "自動"}}}},
+    "sidebar.prompt_launcher.custom": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "Custom"}}, "ja": {"stringUnit": {"state": "translated", "value": "カスタム"}}}},
+    "sidebar.prompt_launcher.sendHint": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "⌘↵ to send"}}, "ja": {"stringUnit": {"state": "translated", "value": "⌘↵ で送信"}}}},
+    "sidebar.prompt_launcher.environmentLabel": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "ENV"}}, "ja": {"stringUnit": {"state": "translated", "value": "環境"}}}},
+    "sidebar.prompt_launcher.agentLabel": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "AGENT"}}, "ja": {"stringUnit": {"state": "translated", "value": "エージェント"}}}},
+    "sidebar.prompt_launcher.repoLabel": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "REPO"}}, "ja": {"stringUnit": {"state": "translated", "value": "リポジトリ"}}}},
+    "sidebar.prompt_launcher.unsupportedEnvironment": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Choose an environment supported by this repository." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "このリポジトリで使用できる環境を選択してください。" } }
+      }
+    },
     "sidebar.prompt_launcher.placeholder": {
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Prompt…"
+            "value": "What should the agent do?"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "プロンプト…"
+            "value": "エージェントに何をしてほしいですか？"
           }
         }
       }

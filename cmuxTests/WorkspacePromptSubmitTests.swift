@@ -11,6 +11,163 @@ import CMUXAgentLaunch
 @MainActor
 @Suite(.serialized)
 struct WorkspacePromptSubmitTests {
+    @Test func forwardedSocketUsesHostBuildIdentityDespiteStaleEnvironment() {
+        let environment = PromptLauncherEnvironment(
+            inherited: [
+                "CMUX_SOCKET_PATH": "/tmp/cmux-debug-old.sock",
+                "CMUX_SOCKET": "/tmp/cmux-debug-old.sock",
+                "CMUX_BUNDLED_CLI_PATH": "/old/cmux",
+                "CMUX_BUNDLE_ID": "old.bundle",
+                "CMUX_TAG": "old",
+                "PATH": "/usr/bin"
+            ],
+            bundledCLIPath: "/current/cmux",
+            bundleIdentifier: "current.bundle",
+            bundleTag: "current"
+        ).merging([
+            "CMUX_BUNDLED_CLI_PATH": "/configured/old/cmux",
+            "CMUX_SOCKET": "/tmp/configured-old.sock",
+            "CUSTOM_SETTING": "preserved"
+        ], forwardedSocketPath: "/tmp/cmux-debug-current.sock")
+
+        #expect(environment["CMUX_SOCKET_PATH"] == "/tmp/cmux-debug-current.sock")
+        #expect(environment["CMUX_SOCKET"] == nil)
+        #expect(environment["CMUX_BUNDLED_CLI_PATH"] == "/current/cmux")
+        #expect(environment["CMUX_BUNDLE_ID"] == "current.bundle")
+        #expect(environment["CMUX_TAG"] == "current")
+        #expect(environment["PATH"] == "/usr/bin")
+        #expect(environment["CUSTOM_SETTING"] == "preserved")
+    }
+
+    @Test func disablingSocketForwardingPreservesConfiguredEnvironment() {
+        let environment = PromptLauncherEnvironment(
+            inherited: ["PATH": "/usr/bin", "CUSTOM_SETTING": "old"],
+            bundledCLIPath: "/current/cmux",
+            bundleIdentifier: "current.bundle",
+            bundleTag: "current"
+        ).merging(["CUSTOM_SETTING": "configured"], forwardedSocketPath: nil)
+
+        #expect(environment == ["PATH": "/usr/bin", "CUSTOM_SETTING": "configured"])
+    }
+
+    @Test func repositorySelectionPreservesManualEnvironmentAndAgent() {
+        let model = PromptLauncherModel(commandRunner: PromptLauncherCommandRunnerSpy())
+        let config = promptLauncherSelectionConfig()
+        model.configure(config)
+        model.selectedTarget = "local"
+        model.selectedProvider = "codex"
+        model.promptText = "Keep my draft"
+
+        for repository in ["backend", "tools", "backend"] {
+            model.selectRepository(repository)
+            model.configure(config)
+            #expect(model.selectedRepository == repository)
+            #expect(model.selectedTarget == "local")
+            #expect(model.selectedProvider == "codex")
+            #expect(model.promptText == "Keep my draft")
+        }
+    }
+
+    @Test func launchUsesManualEnvironmentAgentAndRepository() {
+        let model = PromptLauncherModel(commandRunner: PromptLauncherCommandRunnerSpy())
+        let config = promptLauncherSelectionConfig()
+        model.configure(config)
+        model.selectedTarget = "local"
+        model.selectedProvider = "codex"
+        model.selectRepository("tools")
+        model.promptText = "Use my selections"
+
+        model.launch(
+            config: config,
+            tabManager: TabManager(),
+            configSourcePath: "/tmp/cmux.json",
+            globalConfigPath: "/tmp/cmux.json"
+        )
+
+        #expect(model.jobs.count == 1)
+        #expect(model.jobs.first?.targetID == "local")
+        #expect(model.jobs.first?.providerID == "codex")
+        #expect(model.jobs.first?.repositoryID == "tools")
+    }
+
+    @Test func unsupportedEnvironmentIsPreservedWithoutLaunching() {
+        let model = PromptLauncherModel(commandRunner: PromptLauncherCommandRunnerSpy())
+        let config = promptLauncherSelectionConfig()
+        model.configure(config)
+        model.selectedProvider = "codex"
+        model.selectRepository("tools")
+        model.promptText = "Keep my draft"
+        model.launch(
+            config: config,
+            tabManager: TabManager(),
+            configSourcePath: "/tmp/cmux.json",
+            globalConfigPath: "/tmp/cmux.json"
+        )
+
+        #expect(model.selectedTarget == "auto")
+        #expect(model.selectedProvider == "codex")
+        #expect(model.selectedRepository == "tools")
+        #expect(model.promptText == "Keep my draft")
+        #expect(model.jobs.isEmpty)
+        #expect(!model.isTargetSupported(config))
+
+        model.selectedTarget = "local"
+        #expect(model.isTargetSupported(config))
+        #expect(model.selectedRepository == "tools")
+        #expect(model.selectedProvider == "codex")
+    }
+
+    @Test func autoResetRestoresDestinationAndPreservesAgentAndDraft() {
+        let model = PromptLauncherModel(commandRunner: PromptLauncherCommandRunnerSpy())
+        let config = promptLauncherSelectionConfig()
+        model.configure(config)
+        model.selectedTarget = "local"
+        model.selectedProvider = "codex"
+        model.selectRepository("tools")
+        model.promptText = "Keep my draft"
+
+        model.resetDestination(config)
+
+        #expect(model.selectedTarget == "auto")
+        #expect(model.selectedRepository == "backend")
+        #expect(model.selectedProvider == "codex")
+        #expect(model.promptText == "Keep my draft")
+    }
+
+    @Test func configurationRefreshOnlyReplacesChoicesRemovedFromConfiguration() {
+        let model = PromptLauncherModel(commandRunner: PromptLauncherCommandRunnerSpy())
+        var config = promptLauncherSelectionConfig()
+        model.configure(config)
+        #expect(model.selectedRepository == "backend")
+        #expect(model.selectedTarget == "auto")
+        #expect(model.selectedProvider == "claude")
+        model.selectedTarget = "local"
+        model.selectedProvider = "codex"
+        model.selectRepository("tools")
+
+        config.repositories.removeAll { $0.id == "tools" }
+        model.configure(config)
+        #expect(model.selectedRepository == "backend")
+        #expect(model.selectedTarget == "local")
+        #expect(model.selectedProvider == "codex")
+    }
+
+    private func promptLauncherSelectionConfig() -> CmuxPromptLauncherDefinition {
+        CmuxPromptLauncherDefinition(
+            command: "echo {{target.id}} {{provider.id}} {{repository.id}} {{prompt}}",
+            targets: [.init(id: "auto"), .init(id: "local"), .init(id: "devbox")],
+            providers: [.init(id: "claude"), .init(id: "codex")],
+            repositories: [
+                .init(id: "backend", defaultTarget: "auto"),
+                .init(id: "tools", allowedTargets: ["local", "devbox"], defaultTarget: "devbox")
+            ],
+            defaultTarget: "auto",
+            defaultProvider: "claude",
+            defaultRepository: "backend",
+            forwardCmuxSocket: false
+        )
+    }
+
     @Test func promptLauncherProcessRunnerStreamsOutputAndExitStatus() async {
         let runner = PromptLauncherProcessRunner()
         let stream = await runner.events(
@@ -67,6 +224,9 @@ struct WorkspacePromptSubmitTests {
         let model = PromptLauncherModel(commandRunner: runner)
         let manager = TabManager()
         let workspace = manager.tabs[0]
+        let workspaceRef = try #require(
+            TerminalController.shared.v2Ref(kind: .workspace, uuid: workspace.id) as? String
+        )
         let config = promptLauncherQueueConfig()
 
         model.promptText = "Attach me"
@@ -79,7 +239,7 @@ struct WorkspacePromptSubmitTests {
         let request = try #require(await requests.next())
         await runner.emit(
             .output(
-                ##"CMUX_WORKSPACE_JSON:{"workspace":"workspace:1","title":"[wk4] Attached","color":"#3b82f6","slot":"wk4"}"##
+                "CMUX_WORKSPACE_JSON:{\"workspace\":\"\(workspaceRef)\",\"title\":\"[wk4] Attached\",\"color\":\"#3b82f6\",\"slot\":\"wk4\"}"
             ),
             for: request.id
         )
@@ -103,6 +263,10 @@ struct WorkspacePromptSubmitTests {
         var requests = runner.requests.makeAsyncIterator()
         let model = PromptLauncherModel(commandRunner: runner)
         let manager = TabManager()
+        let workspace = manager.tabs[0]
+        let workspaceRef = try #require(
+            TerminalController.shared.v2Ref(kind: .workspace, uuid: workspace.id) as? String
+        )
         let config = promptLauncherQueueConfig()
 
         model.promptText = "Initialize completely"
@@ -116,19 +280,24 @@ struct WorkspacePromptSubmitTests {
 
         await runner.emit(
             .output(
-                ##"CMUX_WORKSPACE_JSON:{"workspace":"workspace:1","title":"3️⃣ Existing","color":"#3b82f6","slot":"wk3","phase":"attached"}"##
+                "CMUX_WORKSPACE_JSON:{\"workspace\":\"\(workspaceRef)\",\"title\":\"3️⃣ Existing\",\"color\":\"#3b82f6\",\"slot\":\"wk3\",\"phase\":\"attached\"}"
             ),
             for: request.id
         )
-        await runner.emit(.output("[5/6] Waiting for Codex..."), for: request.id)
-        await Task.yield()
+        await runner.emit(.output(##"CMUX_WORKSPACE_JSON:{"progress":"[5/6] Starting agent"}"##), for: request.id)
+        await waitUntil { model.jobs.first?.latestLine == "[5/6] Starting agent" }
+        await runner.emit(.output("/tmp/private-launch-script.sh --internal-argument"), for: request.id)
+        await waitUntil { model.jobs.first?.lastOutput == "/tmp/private-launch-script.sh --internal-argument" }
+        #expect(model.jobs.first?.displayTitle == "3️⃣ Existing")
+        #expect(model.jobs.first?.latestLine == "[5/6] Starting agent")
+        #expect(workspace.statusEntries["launcher.initialization"]?.value == "[5/6] Starting agent")
 
         #expect(model.visibleJobs.map(\.prompt) == ["Initialize completely"])
         #expect(model.jobs.count == 1)
 
         await runner.emit(
             .output(
-                ##"CMUX_WORKSPACE_JSON:{"workspace":"workspace:1","title":"3️⃣ Existing","color":"#3b82f6","slot":"wk3","phase":"ready"}"##
+                "CMUX_WORKSPACE_JSON:{\"workspace\":\"\(workspaceRef)\",\"title\":\"3️⃣ Existing\",\"color\":\"#3b82f6\",\"slot\":\"wk3\",\"phase\":\"ready\"}"
             ),
             for: request.id
         )
@@ -136,6 +305,7 @@ struct WorkspacePromptSubmitTests {
 
         #expect(model.visibleJobs.isEmpty)
         #expect(model.jobs.isEmpty)
+        #expect(workspace.statusEntries["launcher.initialization"] == nil)
     }
 
     @Test func promptLauncherCloseJobsRemainVisibleOnFailureAndCanRetry() async throws {

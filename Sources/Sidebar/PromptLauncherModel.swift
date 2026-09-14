@@ -22,6 +22,8 @@ import CmuxSidebar
         var latestLine: String
         var workspaceID: UUID?
         var usesStructuredLifecycle: Bool
+        var displayTitle: String = String(localized: "sidebar.prompt_launcher.creatingSession", defaultValue: "Creating session")
+        var lastOutput: String = ""
     }
 
     struct CloseJob: Identifiable {
@@ -60,10 +62,8 @@ import CmuxSidebar
         if !config.repositories.isEmpty,
            !config.repositories.contains(where: { $0.id == selectedRepository }) {
             selectedRepository = config.selectedDefaultRepositoryID
-            selectedTarget = config.selectedDefaultTargetID(forRepositoryID: selectedRepository)
         }
-        let availableTargets = config.targets(forRepositoryID: selectedRepository)
-        if !availableTargets.contains(where: { $0.id == selectedTarget }) {
+        if !config.targets.contains(where: { $0.id == selectedTarget }) {
             selectedTarget = config.repositories.isEmpty
                 ? config.selectedDefaultTargetID
                 : config.selectedDefaultTargetID(forRepositoryID: selectedRepository)
@@ -73,9 +73,17 @@ import CmuxSidebar
         }
     }
 
-    func selectRepository(_ repositoryID: String, config: CmuxPromptLauncherDefinition) {
+    func selectRepository(_ repositoryID: String) {
         selectedRepository = repositoryID
-        selectedTarget = config.selectedDefaultTargetID(forRepositoryID: repositoryID)
+    }
+
+    func resetDestination(_ config: CmuxPromptLauncherDefinition) {
+        selectedRepository = config.selectedDefaultRepositoryID
+        selectedTarget = config.selectedDefaultTargetID(forRepositoryID: selectedRepository)
+    }
+
+    func isTargetSupported(_ config: CmuxPromptLauncherDefinition) -> Bool {
+        config.targets(forRepositoryID: selectedRepository).contains { $0.id == selectedTarget }
     }
 
     func launch(
@@ -85,6 +93,7 @@ import CmuxSidebar
         globalConfigPath: String
     ) {
         configure(config)
+        guard isTargetSupported(config) else { return }
         let prompt = promptText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !prompt.isEmpty else { return }
         launch(
@@ -258,7 +267,7 @@ import CmuxSidebar
         tabManager: TabManager
     ) {
         updateJob(jobID) { job in
-            job.latestLine = line
+            job.lastOutput = line
             if job.state == .starting {
                 job.state = .waitingForWorkspace
             }
@@ -281,10 +290,11 @@ import CmuxSidebar
         }
 
         let message = errorMessage?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let latestLine = job.latestLine.trimmingCharacters(in: .whitespacesAndNewlines)
+        let latestLine = job.lastOutput.trimmingCharacters(in: .whitespacesAndNewlines)
         let launchProcessFailed = (exitStatus != nil && exitStatus != 0) || (message?.isEmpty == false)
         if let workspaceID = job.workspaceID,
            let workspace = tabManager.tabs.first(where: { $0.id == workspaceID }) {
+            workspace.statusEntries.removeValue(forKey: "launcher.initialization")
             if launchProcessFailed {
                 workspace.statusEntries["workflow"] = SidebarStatusEntry(
                     key: "workflow",
@@ -369,10 +379,16 @@ import CmuxSidebar
         jobID: UUID,
         tabManager: TabManager
     ) {
+        updateJob(jobID) { job in
+            if let title = metadata.title { job.displayTitle = title }
+            if let progress = metadata.progress { job.latestLine = progress }
+        }
         if metadata.phase != nil {
             updateJob(jobID) { $0.usesStructuredLifecycle = true }
         }
-        guard let workspace = resolveWorkspace(metadata.workspace, tabManager: tabManager) else { return }
+        let boundWorkspace = jobs.first(where: { $0.id == jobID })?.workspaceID
+            .flatMap { id in tabManager.tabs.first { $0.id == id } }
+        guard let workspace = resolveWorkspace(metadata.workspace, tabManager: tabManager) ?? boundWorkspace else { return }
         if let title = metadata.title {
             tabManager.setCustomTitle(tabId: workspace.id, title: title)
         }
@@ -391,7 +407,13 @@ import CmuxSidebar
             job.state = .attached
         }
         if metadata.phase == .ready {
+            workspace.statusEntries.removeValue(forKey: "launcher.initialization")
             jobs.removeAll { $0.id == jobID }
+        } else if let job = jobs.first(where: { $0.id == jobID }), job.usesStructuredLifecycle {
+            workspace.statusEntries["launcher.initialization"] = SidebarStatusEntry(
+                key: "launcher.initialization", value: job.latestLine,
+                icon: "hourglass", color: "#4C8DFF", priority: 120, timestamp: Date()
+            )
         }
     }
 

@@ -12,6 +12,7 @@ struct SidebarPromptLauncherWorkspaceMetadata: Equatable {
     var color: String?
     var slot: String?
     var phase: Phase?
+    var progress: String? = nil
 }
 enum SidebarPromptLauncherTemplateRenderer {
     static func renderCommand(
@@ -118,7 +119,8 @@ enum SidebarPromptLauncherTemplateRenderer {
             slot: firstString(in: object, keys: ["slot", "workspaceSlot", "workspace_slot"]),
             phase: firstString(in: object, keys: ["phase"]).flatMap(
                 SidebarPromptLauncherWorkspaceMetadata.Phase.init(rawValue:)
-            )
+            ),
+            progress: firstString(in: object, keys: ["progress"])
         )
     }
 

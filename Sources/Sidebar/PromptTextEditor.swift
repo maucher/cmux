@@ -13,7 +13,7 @@ struct PromptTextEditor: NSViewRepresentable {
         scrollView.autohidesScrollers = true
         guard let tv = scrollView.documentView as? NSTextView else { return scrollView }
         tv.delegate = context.coordinator
-        tv.font = .systemFont(ofSize: 12)
+        tv.font = .systemFont(ofSize: 13)
         tv.isRichText = true
         tv.isAutomaticLinkDetectionEnabled = true
         tv.linkTextAttributes = [
@@ -70,7 +70,7 @@ struct PromptTextEditorContainer: View {
         ZStack(alignment: .topLeading) {
             if text.isEmpty {
                 Text(placeholder)
-                    .font(.system(size: 12))
+                    .font(.system(size: 13))
                     .foregroundColor(Color(NSColor.placeholderTextColor))
                     .padding(.leading, 9)
                     .padding(.top, 7)
@@ -78,13 +78,5 @@ struct PromptTextEditorContainer: View {
             }
             PromptTextEditor(text: $text, isEditable: isEditable, onSubmit: onSubmit)
         }
-        .background(
-            RoundedRectangle(cornerRadius: 5)
-                .fill(Color(NSColor.controlBackgroundColor))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 5)
-                .stroke(Color(NSColor.separatorColor), lineWidth: 0.5)
-        )
     }
 }
