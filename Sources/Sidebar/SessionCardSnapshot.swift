@@ -191,17 +191,23 @@ struct SessionCardSnapshot: Equatable {
         @MainActor
         static func resolve(workspace: Workspace) -> Status {
             let lifecycleStates = workspace.agentLifecycleStatesByPanelId.values.flatMap { $0.values }
-            let metadataStatus = recognizedMetadataStatus(in: workspace)
-
-            if metadataStatus == .babysitting {
-                return .babysitting
-            }
             if lifecycleStates.contains(.running) ||
-                metadataStatus == .working ||
                 workspace.remoteConnectionState == .connecting ||
                 workspace.remoteConnectionState == .reconnecting {
                 return .working
             }
+
+            // `wk` records transient workspace-launch progress. A failed launch can
+            // remain after an agent has subsequently started or completed, so only
+            // use it when no current agent, workflow, or session state exists.
+            if let currentStatus = recognizedMetadataStatus(
+                in: workspace,
+                keys: ["agent", "workflow", "session"]
+            ) {
+                return currentStatus
+            }
+
+            let metadataStatus = recognizedMetadataStatus(in: workspace)
             if lifecycleStates.contains(.needsInput) || metadataStatus == .needsInput {
                 return .needsInput
             }
@@ -226,15 +232,19 @@ struct SessionCardSnapshot: Equatable {
         }
 
         @MainActor
-        private static func recognizedMetadataStatus(in workspace: Workspace) -> Status? {
+        private static func recognizedMetadataStatus(
+            in workspace: Workspace,
+            keys: Set<String>? = nil
+        ) -> Status? {
             let preferredKeys = Set([
                 "session.status", "agent.status", "status",
                 "workflow", "agent", "wk", "session",
             ])
                 .union(AgentHibernationLifecycleStatusKeys.allowedStatusKeys)
             return workspace.sidebarStatusEntriesVisibleForDisplay()
-                .filter { preferredKeys.contains($0.key) }
+                .filter { (keys ?? preferredKeys).contains($0.key) }
                 .sorted { lhs, rhs in
+                    if keys != nil, lhs.timestamp != rhs.timestamp { return lhs.timestamp > rhs.timestamp }
                     if lhs.priority != rhs.priority { return lhs.priority > rhs.priority }
                     return lhs.timestamp > rhs.timestamp
                 }
