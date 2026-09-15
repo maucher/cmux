@@ -171,6 +171,55 @@ struct SessionCardSnapshotTests {
     }
 
     @MainActor
+    @Test func currentAgentStatusOverridesStaleLaunchFailure() {
+        let workspace = Workspace()
+        workspace.statusEntries["wk"] = SidebarStatusEntry(
+            key: "wk",
+            value: "Creation failed: Connecting remote shell...",
+            icon: "exclamationmark.triangle.fill",
+            priority: 110,
+            timestamp: Date(timeIntervalSince1970: 100)
+        )
+        workspace.statusEntries["agent"] = SidebarStatusEntry(
+            key: "agent",
+            value: "Working",
+            icon: "bolt.fill",
+            priority: 90,
+            timestamp: Date(timeIntervalSince1970: 200)
+        )
+
+        #expect(SessionCardSnapshot.Status.resolve(workspace: workspace) == .working)
+    }
+
+    @MainActor
+    @Test func completedSessionOverridesStaleLaunchAndWorkflowFailures() {
+        let workspace = Workspace()
+        workspace.statusEntries["wk"] = SidebarStatusEntry(
+            key: "wk",
+            value: "Creation failed: Connecting remote shell...",
+            icon: "exclamationmark.triangle.fill",
+            priority: 110,
+            timestamp: Date(timeIntervalSince1970: 100)
+        )
+        workspace.statusEntries["workflow"] = SidebarStatusEntry(
+            key: "workflow",
+            value: "Needs Attention",
+            icon: "exclamationmark.triangle.fill",
+            priority: 100,
+            timestamp: Date(timeIntervalSince1970: 200)
+        )
+        workspace.statusEntries["session"] = SidebarStatusEntry(
+            key: "session",
+            value: "Ready",
+            icon: "checkmark.circle.fill",
+            priority: 10,
+            timestamp: Date(timeIntervalSince1970: 300)
+        )
+
+        #expect(SessionCardSnapshot.Status.resolve(workspace: workspace) == .ready)
+    }
+
+    @MainActor
     @Test func babysittingWorkflowSupersedesStaleAgentStatus() {
         let workspace = Workspace()
         workspace.statusEntries["agent"] = SidebarStatusEntry(
