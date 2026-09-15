@@ -295,7 +295,14 @@ import CmuxSidebar
         if let workspaceID = job.workspaceID,
            let workspace = tabManager.tabs.first(where: { $0.id == workspaceID }) {
             workspace.statusEntries.removeValue(forKey: "launcher.initialization")
-            if launchProcessFailed {
+            let agentStartedOrCompleted = ["agent", "session"].contains { key in
+                guard let entry = workspace.statusEntries[key],
+                      let status = SessionCardSnapshot.Status(sidebarEntry: entry) else {
+                    return false
+                }
+                return status == .working || status == .needsInput || status == .ready
+            }
+            if launchProcessFailed, !agentStartedOrCompleted {
                 workspace.statusEntries["workflow"] = SidebarStatusEntry(
                     key: "workflow",
                     value: String(localized: "sidebar.sessionGroup.needsAttention", defaultValue: "Needs Attention"),
