@@ -177,6 +177,20 @@ struct CLIClaudeHookTimeoutRegressionTests {
             command: #""${CMUX_CLAUDE_HOOK_CMUX_BIN:-cmux}" hooks feed --source claude"#,
             timeout: 125
         )
+        // Task-subagent tracking stays on the direct lane: Claude subagent
+        // events are not queue-safe (AgentHookDeliveryPolicy).
+        try expectDirectHook(
+            hooks,
+            event: "SubagentStart",
+            command: #""${CMUX_CLAUDE_HOOK_CMUX_BIN:-cmux}" hooks claude subagent-start"#,
+            timeout: 10
+        )
+        try expectDirectHook(
+            hooks,
+            event: "SubagentStop",
+            command: #""${CMUX_CLAUDE_HOOK_CMUX_BIN:-cmux}" hooks claude subagent-stop"#,
+            timeout: 10
+        )
         try expectDirectHook(
             hooks,
             event: "Stop",

@@ -487,6 +487,51 @@ struct SidebarWorkspaceRowBackgroundStyle: Equatable, Hashable {
     static let clear = Self(color: nil, opacity: 0)
 }
 
+enum SidebarWorkspaceRowBackgroundMode: String, CaseIterable {
+    case selectionOnly
+    case customColorWhenActive
+    case customColorAlways
+}
+
+enum SidebarWorkspaceRowBackgroundSettings {
+    static let modeKey = "workspaceColors.rowBackgroundMode"
+    static let inactiveOpacityKey = "workspaceColors.inactiveOpacity"
+    static let inactiveMultiSelectOpacityKey = "workspaceColors.inactiveMultiSelectOpacity"
+
+    static let defaultMode: SidebarWorkspaceRowBackgroundMode = .customColorAlways
+    // Keep every workspace's assigned color visible while leaving a clear,
+    // full-opacity step up for the active workspace.
+    static let defaultInactiveOpacity = 0.55
+    static let defaultInactiveMultiSelectOpacity = 0.35
+
+    static func mode(defaults: UserDefaults = .standard) -> SidebarWorkspaceRowBackgroundMode {
+        guard let rawValue = defaults.string(forKey: modeKey),
+              let mode = SidebarWorkspaceRowBackgroundMode(rawValue: rawValue) else {
+            return defaultMode
+        }
+        return mode
+    }
+
+    static func inactiveOpacity(defaults: UserDefaults = .standard) -> Double {
+        clampedOpacity(
+            defaults.object(forKey: inactiveOpacityKey) as? NSNumber,
+            defaultValue: defaultInactiveOpacity
+        )
+    }
+
+    static func inactiveMultiSelectOpacity(defaults: UserDefaults = .standard) -> Double {
+        clampedOpacity(
+            defaults.object(forKey: inactiveMultiSelectOpacityKey) as? NSNumber,
+            defaultValue: defaultInactiveMultiSelectOpacity
+        )
+    }
+
+    static func clampedOpacity(_ raw: NSNumber?, defaultValue: Double) -> Double {
+        guard let raw else { return defaultValue }
+        return min(1, max(0, raw.doubleValue))
+    }
+}
+
 func sidebarWorkspaceRowExplicitRailNSColor(
     activeTabIndicatorStyle: WorkspaceIndicatorStyle,
     customColorHex: String?,
@@ -515,7 +560,10 @@ func sidebarWorkspaceRowBackgroundStyle(
     unselectedFillOpacity: Double = 0.7,
     isEmphasized: Bool = true,
     increaseContrast: Bool = false,
-    accent: CmuxAccentColor = CmuxAccentColor()
+    accent: CmuxAccentColor = CmuxAccentColor(),
+    rowBackgroundMode: SidebarWorkspaceRowBackgroundMode = SidebarWorkspaceRowBackgroundSettings.defaultMode,
+    inactiveCustomColorOpacity: Double = SidebarWorkspaceRowBackgroundSettings.defaultInactiveOpacity,
+    inactiveCustomColorMultiSelectOpacity: Double = SidebarWorkspaceRowBackgroundSettings.defaultInactiveMultiSelectOpacity
 ) -> SidebarWorkspaceRowBackgroundStyle {
     // Increase Contrast: the multi-selection wash is otherwise too faint to
     // read against the sidebar material.
@@ -556,10 +604,22 @@ func sidebarWorkspaceRowBackgroundStyle(
     switch activeTabIndicatorStyle {
     case .leftRail:
         if isActive {
+            if rowBackgroundMode != .selectionOnly, let customBackground {
+                return SidebarWorkspaceRowBackgroundStyle(
+                    color: customBackground,
+                    opacity: 1
+                )
+            }
             if usesSubtleSelection { return calmFill(isSecondary: false) }
             return SidebarWorkspaceRowBackgroundStyle(
                 color: selectedBackground,
                 opacity: 1
+            )
+        }
+        if rowBackgroundMode == .customColorAlways, let customBackground {
+            return SidebarWorkspaceRowBackgroundStyle(
+                color: customBackground,
+                opacity: isMultiSelected ? inactiveCustomColorMultiSelectOpacity : inactiveCustomColorOpacity
             )
         }
         if isMultiSelected {
@@ -570,12 +630,18 @@ func sidebarWorkspaceRowBackgroundStyle(
 
     case .solidFill:
         if isActive {
+            if rowBackgroundMode != .selectionOnly, let customBackground {
+                return SidebarWorkspaceRowBackgroundStyle(
+                    color: customBackground,
+                    opacity: 1
+                )
+            }
             return SidebarWorkspaceRowBackgroundStyle(
                 color: selectedBackground,
                 opacity: 1
             )
         }
-        if let customBackground {
+        if rowBackgroundMode == .customColorAlways, let customBackground {
             // `workspaceColors.unselectedFillOpacity`; multi-selected rows use half.
             let fillOpacity = unselectedFillOpacity.isFinite ? min(max(unselectedFillOpacity, 0), 1) : 0.7
             return SidebarWorkspaceRowBackgroundStyle(

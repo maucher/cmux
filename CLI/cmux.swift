@@ -301,6 +301,8 @@ struct ClaudeHookSessionRecord: Codable {
     /// correlation remains disabled for this session; re-enabling it after
     /// eviction would let an old delayed callback consume a newer approval.
     var cursorShellCommandOnlyCorrelationDisabled: Bool? = nil
+    /// In-flight Task-tool subagents tracked via SubagentStart/SubagentStop hooks.
+    var activeSubagentCount: Int?
 }
 
 struct ClaudeHookActiveSessionRecord: Codable {
@@ -1026,6 +1028,31 @@ final class ClaudeHookSessionStore {
                   record.lastPermissionMode != mode else { return }
             record.lastPermissionMode = mode
             state.sessions[normalized] = record
+        }
+    }
+
+    func activeSubagentCount(sessionId: String) -> Int {
+        let normalized = normalizeSessionId(sessionId)
+        guard !normalized.isEmpty else { return 0 }
+        return (try? withLockedState { state in
+            state.sessions[normalized]?.activeSubagentCount ?? 0
+        }) ?? 0
+    }
+
+    @discardableResult
+    func adjustActiveSubagentCount(sessionId: String, delta: Int) throws -> Int {
+        let normalized = normalizeSessionId(sessionId)
+        guard !normalized.isEmpty else { return 0 }
+        return try withLockedState { state in
+            guard var record = state.sessions[normalized] else { return 0 }
+            let now = Date().timeIntervalSince1970
+            let current = record.activeSubagentCount ?? 0
+            let next = max(0, current + delta)
+            record.activeSubagentCount = next > 0 ? next : nil
+            record.updatedAt = now
+            state.sessions[normalized] = record
+            try saveUnlocked(state)
+            return next
         }
     }
 
@@ -31399,6 +31426,83 @@ struct CMUXCLI {
             }
             printClaudeHookAck()
 
+        case "subagent-start":
+            telemetry.breadcrumb("claude-hook.subagent-start")
+            let mappedSubagentStartSession = parsedInput.sessionId.flatMap { try? sessionStore.lookup(sessionId: $0) }
+            guard let subagentStartSessionId = parsedInput.sessionId,
+                  let resolvedSubagentStartTarget = try resolveClaudeHookDeliveryTarget(
+                    mappedSession: mappedSubagentStartSession,
+                    routing: hookRouting,
+                    client: client
+                  ), resolvedSubagentStartTarget.isAuthoritative else {
+                printClaudeHookAck()
+                return
+            }
+            _ = try? sessionStore.adjustActiveSubagentCount(sessionId: subagentStartSessionId, delta: 1)
+            // Sidebar lifecycle is a fold over agent-journal events; an explicit
+            // phase assertion keeps the parent pane Running while the Task
+            // subagent works.
+            emitAgentJournalEvent(
+                client: client,
+                kind: .stateChanged,
+                source: "claude",
+                agentKey: Self.claudeCodeStatusKey,
+                sessionId: subagentStartSessionId,
+                workspaceId: resolvedSubagentStartTarget.workspaceId,
+                surfaceId: resolvedSubagentStartTarget.surfaceId,
+                nativeEvent: "SubagentStart",
+                declaredPhase: .running,
+                store: sessionStore,
+                telemetry: telemetry
+            )
+            printClaudeHookAck()
+
+        case "subagent-stop":
+            telemetry.breadcrumb("claude-hook.subagent-stop")
+            let mappedSubagentStopSession = parsedInput.sessionId.flatMap { try? sessionStore.lookup(sessionId: $0) }
+            guard let subagentStopSessionId = parsedInput.sessionId,
+                  let resolvedSubagentStopTarget = try resolveClaudeHookDeliveryTarget(
+                    mappedSession: mappedSubagentStopSession,
+                    routing: hookRouting,
+                    client: client
+                  ), resolvedSubagentStopTarget.isAuthoritative else {
+                printClaudeHookAck()
+                return
+            }
+            let remainingSubagents = (try? sessionStore.adjustActiveSubagentCount(
+                sessionId: subagentStopSessionId,
+                delta: -1
+            )) ?? 0
+            // Only settle the pane once the parent turn already stopped while
+            // subagents were still running (Stop recorded backgroundWorkPending);
+            // a subagent finishing mid-turn must not flip a working parent idle.
+            if remainingSubagents == 0,
+               mappedSubagentStopSession?.agentLifecycle == .backgroundWorkPending,
+               mappedSubagentStopSession?.hadPendingBackgroundWorkAtStop != true {
+                emitAgentJournalEvent(
+                    client: client,
+                    kind: .stateChanged,
+                    source: "claude",
+                    agentKey: Self.claudeCodeStatusKey,
+                    sessionId: subagentStopSessionId,
+                    workspaceId: resolvedSubagentStopTarget.workspaceId,
+                    surfaceId: resolvedSubagentStopTarget.surfaceId,
+                    nativeEvent: "SubagentStop",
+                    declaredPhase: .idle,
+                    store: sessionStore,
+                    telemetry: telemetry
+                )
+                try? setClaudeStatus(
+                    client: client,
+                    workspaceId: resolvedSubagentStopTarget.workspaceId,
+                    surfaceId: resolvedSubagentStopTarget.surfaceId,
+                    value: String(localized: "agent.generic.notification.status.idle", defaultValue: "Idle"),
+                    icon: "pause.circle.fill",
+                    color: "#8E8E93"
+                )
+            }
+            printClaudeHookAck()
+
         case "stop", "idle":
             telemetry.breadcrumb("claude-hook.stop")
             do {
@@ -31525,7 +31629,13 @@ struct CMUXCLI {
                 // background task or a pending cron). Cached on the session record so
                 // the ~60s-later idle_prompt Notification can consult it, and forwarded
                 // to the app so it can suppress the done-ping until work truly drains.
-                let hasPendingBackgroundWork = hasActiveClaudeBackgroundWork(parsedInput)
+                let hadBackgroundTasks = hasActiveClaudeBackgroundWork(parsedInput)
+                // In-flight Task-tool subagents (SubagentStart/SubagentStop)
+                // keep the turn pending until they finish.
+                let activeSubagents = parsedInput.sessionId.map {
+                    sessionStore.activeSubagentCount(sessionId: $0)
+                } ?? 0
+                let hasPendingBackgroundWork = hadBackgroundTasks || activeSubagents > 0
                 // Claude sets stop_hook_active on a re-entry after a Stop hook
                 // blocked once. That flag describes hook recursion, not pending
                 // work: it must not mark the turn pending. Only authoritative
@@ -31554,7 +31664,7 @@ struct CMUXCLI {
                         hookEventName: reportedHookEventName(from: parsedInput) ?? "Stop",
                         lastSubtitle: completion?.subtitle,
                         lastBody: completion?.body,
-                        hadPendingBackgroundWorkAtStop: hasPendingBackgroundWork,
+                        hadPendingBackgroundWorkAtStop: hadBackgroundTasks,
                         markActive: true,
                         allowsNewSessionReplacement: true
                     )
@@ -38886,6 +38996,10 @@ export default {
             // Cursor's sandboxed (or malformed) shell payload is telemetry
             // only. It must not fall through to the generic prompt-submit lane.
             .shellObserved
+        } else if def.name == "cursor", subcommand == "agent-response" {
+            // Cursor emits afterAgentResponse at every LLM boundary mid-turn; only
+            // the real stop event should flip the pane to Ready.
+            .noop
         } else {
             Self.subcommandActions[subcommand] ?? .noop
         }

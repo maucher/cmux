@@ -1172,7 +1172,7 @@ final class SidebarWorkspaceTableController: NSObject, NSTableViewDataSource, NS
         // Group headers intentionally mint their anchor payload: anchor drags
         // route to top-level whole-group plans and are rejected cross-window.
         _ = tableView
-        guard rows.indices.contains(row), let actions else { return nil }
+        guard rows.indices.contains(row), rows[row].allowsDragging, let actions else { return nil }
         let rowConfiguration = rows[row]
         // Group headers resolve through the live anchor map captured for the
         // drag. A missing anchor fails closed; workspace rows retain the

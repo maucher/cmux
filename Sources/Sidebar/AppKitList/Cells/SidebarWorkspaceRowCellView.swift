@@ -229,7 +229,10 @@ final class SidebarWorkspaceRowTableCellView: NSTableCellView {
             unselectedFillOpacity: settings.unselectedFillOpacity,
             isEmphasized: palette.isSelectionEmphasized,
             increaseContrast: palette.increasesSelectionContrast,
-            accent: palette.accent
+            accent: palette.accent,
+            rowBackgroundMode: settings.rowBackgroundMode,
+            inactiveCustomColorOpacity: settings.inactiveCustomColorOpacity,
+            inactiveCustomColorMultiSelectOpacity: settings.inactiveCustomColorMultiSelectOpacity
         )
         applyBackgroundStyle(style)
         if let edgeColor = style.edgeColor {

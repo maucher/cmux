@@ -59,6 +59,7 @@ struct SidebarWorkspaceSnapshotBuilder {
         let hasManualCustomColor: Bool
         /// Stable Cloud identity, independent of connection status and detail visibility.
         let cloudWorkspaceLabel: String?
+        let sessionCard: SessionCardSnapshot?
         let remoteWorkspaceSidebarText: String?
         let remoteConnectionStatusText: String
         let remoteStateHelpText: String

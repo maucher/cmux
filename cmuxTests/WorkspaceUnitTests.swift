@@ -283,7 +283,7 @@ final class SidebarSelectedWorkspaceColorTests: XCTestCase {
     }
 
     @MainActor
-    func testSolidFillKeepsSelectedBackgroundForActiveCustomColoredWorkspaceRow() {
+    func testSolidFillUsesCustomColorForActiveCustomColoredWorkspaceRow() {
         let manager = TabManager()
         guard let workspace = manager.tabs.first else {
             XCTFail("Expected TabManager to initialise with a workspace")
@@ -310,20 +310,13 @@ final class SidebarSelectedWorkspaceColorTests: XCTestCase {
             sidebarSelectionColorHex: nil
         )
 
-        XCTAssertEqual(
-            background.color?.hexString(),
-            sidebarSelectedWorkspaceBackgroundNSColor(
-                for: .light,
-                sidebarSelectionColorHex: nil,
-                activeTabIndicatorStyle: .solidFill
-            ).hexString()
-        )
+        XCTAssertEqual(background.color?.hexString(), "#C0392B")
         XCTAssertEqual(background.opacity, 1.0, accuracy: 0.001)
         withExtendedLifetime(cancellable) {}
     }
 
     @MainActor
-    func testSubtleLeftRailSelectionIgnoresActiveCustomWorkspaceColor() {
+    func testLeftRailUsesCustomColorForActiveCustomColoredWorkspaceRow() {
         let manager = TabManager()
         guard let workspace = manager.tabs.first else {
             XCTFail("Expected TabManager to initialise with a workspace")
@@ -353,16 +346,62 @@ final class SidebarSelectedWorkspaceColorTests: XCTestCase {
             increaseContrast: false
         )
 
+        // Left-rail rows brighten the workspace color for display.
         XCTAssertEqual(
-            background.color,
-            CmuxSelectionFill.resolve(colorScheme: .light, isEmphasized: true, increaseContrast: false).color
+            background.color?.hexString(),
+            WorkspaceTabColorSettings.displayNSColor(
+                hex: "#C0392B",
+                colorScheme: .light,
+                forceBright: true
+            )?.hexString()
         )
         XCTAssertEqual(background.opacity, 1.0, accuracy: 0.001)
         withExtendedLifetime(cancellable) {}
     }
 
+    func testActiveUncoloredWorkspaceRowUsesSelectedBackground() {
+        let background = sidebarWorkspaceRowBackgroundStyle(
+            activeTabIndicatorStyle: .solidFill,
+            isActive: true,
+            isMultiSelected: false,
+            customColorHex: nil,
+            colorScheme: .light,
+            sidebarSelectionColorHex: nil
+        )
+
+        XCTAssertEqual(
+            background.color?.hexString(),
+            sidebarSelectedWorkspaceBackgroundNSColor(
+                for: .light,
+                sidebarSelectionColorHex: nil,
+                activeTabIndicatorStyle: .solidFill
+            ).hexString()
+        )
+        XCTAssertEqual(background.opacity, 1.0, accuracy: 0.001)
+    }
+
+    func testSubtleLeftRailSelectionUsesCalmFillForActiveUncoloredWorkspaceRow() {
+        let background = sidebarWorkspaceRowBackgroundStyle(
+            activeTabIndicatorStyle: .leftRail,
+            isActive: true,
+            isMultiSelected: false,
+            customColorHex: nil,
+            colorScheme: .light,
+            sidebarSelectionColorHex: nil,
+            subtleSelection: true,
+            isEmphasized: true,
+            increaseContrast: false
+        )
+
+        XCTAssertEqual(
+            background.color,
+            CmuxSelectionFill.resolve(colorScheme: .light, isEmphasized: true, increaseContrast: false).color
+        )
+        XCTAssertEqual(background.opacity, 1.0, accuracy: 0.001)
+    }
+
     @MainActor
-    func testLeftRailLeavesInactiveCustomColoredWorkspaceRowTransparent() {
+    func testLeftRailUsesCustomColorForInactiveCustomColoredWorkspaceRow() {
         let manager = TabManager()
         guard let workspace = manager.tabs.first else {
             XCTFail("Expected TabManager to initialise with a workspace")
@@ -380,8 +419,15 @@ final class SidebarSelectedWorkspaceColorTests: XCTestCase {
             sidebarSelectionColorHex: nil
         )
 
-        XCTAssertNil(background.color)
-        XCTAssertEqual(background.opacity, 0, accuracy: 0.001)
+        XCTAssertEqual(
+            background.color?.hexString(),
+            WorkspaceTabColorSettings.displayNSColor(
+                hex: "#C0392B",
+                colorScheme: .light,
+                forceBright: true
+            )?.hexString()
+        )
+        XCTAssertEqual(background.opacity, 0.55, accuracy: 0.001)
     }
 
     @MainActor
@@ -424,7 +470,7 @@ final class SidebarSelectedWorkspaceColorTests: XCTestCase {
         )
 
         XCTAssertEqual(background.color?.hexString(), "#C0392B")
-        XCTAssertEqual(background.opacity, 0.7, accuracy: 0.001)
+        XCTAssertEqual(background.opacity, 0.55, accuracy: 0.001)
     }
 
     @MainActor
@@ -2558,6 +2604,73 @@ final class KeyboardShortcutSettingsFileStoreTests: XCTestCase {
             startWatching: false
         )
         XCTAssertTrue(SidebarTabItemSettingsSnapshot(defaults: defaults).brightenInDarkMode)
+    }
+
+    func testSettingsFileStoreAppliesWorkspaceRowBackgroundSettings() throws {
+        let defaults = UserDefaults.standard
+        let previousMode = defaults.object(forKey: SidebarWorkspaceRowBackgroundSettings.modeKey)
+        let previousInactiveOpacity = defaults.object(forKey: SidebarWorkspaceRowBackgroundSettings.inactiveOpacityKey)
+        let previousInactiveMultiSelectOpacity = defaults.object(
+            forKey: SidebarWorkspaceRowBackgroundSettings.inactiveMultiSelectOpacityKey
+        )
+        let previousBackups = defaults.data(forKey: settingsFileBackupsDefaultsKey)
+        defer {
+            if let previousMode {
+                defaults.set(previousMode, forKey: SidebarWorkspaceRowBackgroundSettings.modeKey)
+            } else {
+                defaults.removeObject(forKey: SidebarWorkspaceRowBackgroundSettings.modeKey)
+            }
+            if let previousInactiveOpacity {
+                defaults.set(previousInactiveOpacity, forKey: SidebarWorkspaceRowBackgroundSettings.inactiveOpacityKey)
+            } else {
+                defaults.removeObject(forKey: SidebarWorkspaceRowBackgroundSettings.inactiveOpacityKey)
+            }
+            if let previousInactiveMultiSelectOpacity {
+                defaults.set(
+                    previousInactiveMultiSelectOpacity,
+                    forKey: SidebarWorkspaceRowBackgroundSettings.inactiveMultiSelectOpacityKey
+                )
+            } else {
+                defaults.removeObject(forKey: SidebarWorkspaceRowBackgroundSettings.inactiveMultiSelectOpacityKey)
+            }
+            if let previousBackups {
+                defaults.set(previousBackups, forKey: settingsFileBackupsDefaultsKey)
+            } else {
+                defaults.removeObject(forKey: settingsFileBackupsDefaultsKey)
+            }
+        }
+
+        defaults.removeObject(forKey: SidebarWorkspaceRowBackgroundSettings.modeKey)
+        defaults.removeObject(forKey: SidebarWorkspaceRowBackgroundSettings.inactiveOpacityKey)
+        defaults.removeObject(forKey: SidebarWorkspaceRowBackgroundSettings.inactiveMultiSelectOpacityKey)
+        defaults.removeObject(forKey: settingsFileBackupsDefaultsKey)
+
+        let directoryURL = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directoryURL) }
+
+        let settingsFileURL = directoryURL.appendingPathComponent("cmux.json", isDirectory: false)
+        try writeSettingsFile(
+            """
+            {
+              "workspaceColors": {
+                "rowBackgroundMode": "selectionOnly",
+                "inactiveOpacity": 1.25,
+                "inactiveMultiSelectOpacity": -0.25
+              }
+            }
+            """,
+            to: settingsFileURL
+        )
+
+        _ = KeyboardShortcutSettingsFileStore(
+            primaryPath: settingsFileURL.path,
+            fallbackPath: nil,
+            startWatching: false
+        )
+
+        XCTAssertEqual(SidebarWorkspaceRowBackgroundSettings.mode(defaults: defaults), .selectionOnly)
+        XCTAssertEqual(SidebarWorkspaceRowBackgroundSettings.inactiveOpacity(defaults: defaults), 1)
+        XCTAssertEqual(SidebarWorkspaceRowBackgroundSettings.inactiveMultiSelectOpacity(defaults: defaults), 0)
     }
 
     func testSettingsFileStoreResolvesWorkspaceColorsUnselectedFillOpacity() throws {

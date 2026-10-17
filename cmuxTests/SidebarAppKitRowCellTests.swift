@@ -32,6 +32,7 @@ struct SidebarAppKitRowCellTests {
             customColorHex: nil,
             hasManualCustomColor: false,
             cloudWorkspaceLabel: nil,
+            sessionCard: nil,
             remoteWorkspaceSidebarText: nil,
             remoteConnectionStatusText: "",
             remoteStateHelpText: "",

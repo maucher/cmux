@@ -673,6 +673,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             self.sidebarSelectionState = sidebarSelectionState
             self.fileExplorerState = fileExplorerState
             self.cmuxConfigStore = cmuxConfigStore
+            // The prompt launcher's close/restart hooks read config through
+            // the window's TabManager.
+            if let cmuxConfigStore {
+                tabManager.cmuxConfigStore = cmuxConfigStore
+            }
             self.window = window
             self.workspaceTerminalFontSizeArbiter =
                 workspaceTerminalFontSizeArbiter
@@ -5568,6 +5573,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             )
             if let cmuxConfigStore {
                 existing.cmuxConfigStore = cmuxConfigStore
+                tabManager.cmuxConfigStore = cmuxConfigStore
             }
             existing.closeObserver = WindowCloseObserver(window: window) { [weak self] in self?.unregisterMainWindow($0) }
         } else if let existing = mainWindowContexts.values.first(where: { $0.windowId == windowId }) {
@@ -5606,6 +5612,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             )
             if let cmuxConfigStore {
                 existing.cmuxConfigStore = cmuxConfigStore
+                tabManager.cmuxConfigStore = cmuxConfigStore
             }
             reindexMainWindowContextIfNeeded(existing, for: window)
             existing.closeObserver = WindowCloseObserver(window: window) { [weak self] in self?.unregisterMainWindow($0) }

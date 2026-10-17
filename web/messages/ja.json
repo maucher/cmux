@@ -3342,6 +3342,19 @@
           "agentAutoResume": "再試行可能な上流エラー（モデルの容量不足、過負荷、接続切断）でターンが終了した cmux 起動のエージェントに、バックオフ付きで `continue` を送信します。人の入力を待っているターンは再開しません。",
           "canonicalAgentScratch": "Use a cmux-owned scratch directory for native agent panels, organized per session."
         },
+        "promptLauncher": {
+          "command": "`/bin/zsh -l -c` で実行するシェルコマンドテンプレートです。{{prompt}}、{{target.args}}、{{provider.args}}、{{repository.args}} などのプレースホルダーを使用できます。",
+          "restartHook": "セッションカードの再起動ボタンを押したときに実行する任意のシェルコマンドテンプレートです。{{workspace.id}}、{{workspace.title}}、{{workspace.description}}、{{workspace.color}}、{{workspace.slot}} を使用できます。",
+          "repositories": "プロンプトランチャーの3つ目のピッカーに表示する任意のリポジトリ選択肢です。",
+          "defaultRepository": "最初に選択するリポジトリの ID です。省略時は先頭のリポジトリです。",
+          "repositoryId": "リポジトリを識別する安定した ID です。",
+          "repositoryTitle": "ピッカーに表示するリポジトリ名です。省略時は id を使います。",
+          "repositoryLabel": "title の従来の別名です。",
+          "repositoryArgs": "{{repository.args}} に挿入する引数です。",
+          "repositoryArguments": "args の従来の別名です。",
+          "allowedTargets": "このリポジトリの選択中に利用できるターゲット ID です。省略時は設定済みの全ターゲットを利用できます。",
+          "repositoryDefaultTarget": "このリポジトリを選んだときに選択するターゲットです。"
+        },
         "app": {
           "confirmQuit": "cmux の終了前に確認を求めるタイミングを制御します。DEV ビルドではこの設定に関係なく常にすぐ終了します。従来の app.warnBeforeQuit も boolean フォールバックとして引き続き受け付けます。",
           "windowTitleTemplate": "任意の NSWindow タイトルテンプレートです。空欄のままなら、現在のディレクトリへのフォールバックを含む cmux 既存の既定タイトル動作を保ちます。対応するプレースホルダー: '{windowId}', '{windowToken}', '{activeWorkspace}', '{activeDirectory}', '{defaultTitle}', '{appName}'。",

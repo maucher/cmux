@@ -11,6 +11,19 @@ final class FakeSidebarV1ControlCommandContext: ControlCommandContext {
         tabArg: String?, number: Int, label: String, url: URL, state: String, branch: String?
     )?
     nonisolated(unsafe) var manualPullRequestClearTab: String?
+    nonisolated(unsafe) var statusUpsertCall: (
+        target: ControlSidebarTabTarget,
+        key: String,
+        value: String,
+        icon: String?,
+        color: String?,
+        url: URL?,
+        priority: Int,
+        format: ControlSidebarMetadataFormat,
+        panelID: UUID?,
+        pid: Int32?,
+        workState: ControlSidebarAgentWorkState?
+    )?
     nonisolated(unsafe) var statusClearCall: (
         target: ControlSidebarTabTarget,
         key: String,
@@ -27,13 +40,13 @@ final class FakeSidebarV1ControlCommandContext: ControlCommandContext {
         scope: ControlSidebarPanelScope,
         stateRawValue: String
     )?
-    nonisolated(unsafe) var statusUpsertCall: (
-        target: ControlSidebarTabTarget,
-        key: String,
-        value: String,
-        icon: String?,
-        panelID: UUID?,
-        workState: ControlSidebarAgentWorkState?
+    nonisolated(unsafe) var pullRequestUpdateCall: (
+        target: ControlSidebarPanelMutationTarget,
+        number: Int,
+        label: String,
+        url: URL,
+        statusRawValue: String,
+        branch: String?
     )?
 
     nonisolated func controlSurfaceParseShellActivityState(
@@ -82,7 +95,20 @@ final class FakeSidebarV1ControlCommandContext: ControlCommandContext {
         pid: Int32?,
         workState: ControlSidebarAgentWorkState?
     ) {
-        statusUpsertCall = (target, key, value, icon, panelID, workState)
+        statusUpsertCall = (
+            target, key, value, icon, color, url, priority, format, panelID, pid, workState
+        )
+    }
+
+    nonisolated func controlSidebarSchedulePanelPullRequestUpdate(
+        target: ControlSidebarPanelMutationTarget,
+        number: Int,
+        label: String,
+        url: URL,
+        statusRawValue: String,
+        branch: String?
+    ) {
+        pullRequestUpdateCall = (target, number, label, url, statusRawValue, branch)
     }
 
     nonisolated func controlSidebarScheduleStatusClear(
