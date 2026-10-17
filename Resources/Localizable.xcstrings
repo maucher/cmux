@@ -658288,6 +658288,13 @@
         }
       }
     },
+    "sidebar.prompt_launcher.autoRestartFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Auto-restart failed; click restart" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "自動再起動に失敗しました。再起動をクリックしてください" } }
+      }
+    },
     "sidebar.prompt_launcher.creatingSession": {
       "extractionState": "manual",
       "localizations": {

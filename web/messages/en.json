@@ -3422,6 +3422,8 @@
         "promptLauncher": {
           "command": "Shell command template run with `/bin/zsh -l -c`. Supported placeholders include {{prompt}}, {{target.args}}, {{provider.args}}, and {{repository.args}}.",
           "restartHook": "Optional shell command template run when the session-card restart button is pressed. Supported placeholders include {{workspace.id}}, {{workspace.title}}, {{workspace.description}}, {{workspace.color}}, and {{workspace.slot}}.",
+          "autoRestartHook": "Optional shell command template cmux runs on its own to restore a remote workspace after wake, a network change, or a dropped SSH pane. Exit 0 means healthy or restored, 3 means the workspace is not managed by the hook, and 75 means temporarily unreachable (retried with backoff). Uses the same placeholders as restartHook.",
+          "autoRestartGraceSeconds": "Seconds cmux waits after wake or a network change, letting its own reconnect finish, before running autoRestartHook.",
           "repositories": "Optional repository choices shown in a third prompt launcher picker.",
           "defaultRepository": "ID of the initially selected repository. Defaults to the first repository.",
           "repositoryId": "Stable repository identifier.",

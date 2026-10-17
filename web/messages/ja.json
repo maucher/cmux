@@ -3345,6 +3345,8 @@
         "promptLauncher": {
           "command": "`/bin/zsh -l -c` で実行するシェルコマンドテンプレートです。{{prompt}}、{{target.args}}、{{provider.args}}、{{repository.args}} などのプレースホルダーを使用できます。",
           "restartHook": "セッションカードの再起動ボタンを押したときに実行する任意のシェルコマンドテンプレートです。{{workspace.id}}、{{workspace.title}}、{{workspace.description}}、{{workspace.color}}、{{workspace.slot}} を使用できます。",
+          "autoRestartHook": "スリープ解除、ネットワーク変更、SSH ペインの切断後に、cmux がリモートワークスペースを自動で復元するときに実行する任意のシェルコマンドテンプレートです。終了コード 0 は正常または復元済み、3 はフックの管理対象外、75 は一時的に到達不能(バックオフで再試行)を意味します。restartHook と同じプレースホルダーを使用できます。",
+          "autoRestartGraceSeconds": "スリープ解除やネットワーク変更の後、cmux 自身の再接続を待ってから autoRestartHook を実行するまでの秒数です。",
           "repositories": "プロンプトランチャーの3つ目のピッカーに表示する任意のリポジトリ選択肢です。",
           "defaultRepository": "最初に選択するリポジトリの ID です。省略時は先頭のリポジトリです。",
           "repositoryId": "リポジトリを識別する安定した ID です。",

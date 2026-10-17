@@ -882,6 +882,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     }
     private var workspaceObserver: NSObjectProtocol?
     private var lifecycleSnapshotObservers: [NSObjectProtocol] = []
+    /// Restores prompt-launcher remote workspaces after wake or a network change.
+    var promptLauncherAutoRestartCoordinator: PromptLauncherAutoRestartCoordinator?
+    var remoteSessionNetworkPathMonitor: RemoteSessionNetworkPathMonitor?
     private var windowKeyObservers: [NSObjectProtocol] = []
     private var shortcutMonitor: Any?
     private var shortcutDefaultsObserver: NSObjectProtocol?
@@ -4669,13 +4672,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
         let remotePowerObservers = RemoteSessionPowerObserver().install(
             in: workspaceCenter,
-            onWillSleep: { [weak self] in self?.prepareRemoteSessionsForSystemSleep() },
+            onWillSleep: { [weak self] in
+                self?.prepareRemoteSessionsForSystemSleep()
+                self?.promptLauncherAutoRestartCoordinator?.noteSystemWillSleep()
+            },
             onDidWake: { [weak self] in
                 self?.restartSocketListenerIfEnabled(source: "workspace.didWake")
                 self?.rearmRemoteSessionsAfterSystemWake()
+                self?.promptLauncherAutoRestartCoordinator?.noteSystemWake()
             }
         )
         lifecycleSnapshotObservers.append(contentsOf: remotePowerObservers)
+        installPromptLauncherAutoRestart()
 
         registerDisplayReconfigurationCallbackIfNeeded()
         let displayReconfigurationObserver = NotificationCenter.default.addObserver(

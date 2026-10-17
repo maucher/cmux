@@ -2940,6 +2940,8 @@
 		A5C0DE0000000000000000B4 /* ProjectPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5C0DE0000000000000000B3 /* ProjectPanelView.swift */; };
 		A5C0DE0000000000000000BC /* ProjectSchemesTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5C0DE0000000000000000BB /* ProjectSchemesTabView.swift */; };
 		A5C0DE0000000000000000B8 /* ProjectTargetsTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5C0DE0000000000000000B7 /* ProjectTargetsTabView.swift */; };
+		7A0A57A70000000000000001 /* PromptLauncherAutoRestartCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A0A57A70000000000000002 /* PromptLauncherAutoRestartCoordinator.swift */; };
+		7A0A57A70000000000000005 /* PromptLauncherAutoRestartCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A0A57A70000000000000006 /* PromptLauncherAutoRestartCoordinatorTests.swift */; };
 		D4A100010000000000000005 /* PromptLauncherCommandRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4A100020000000000000005 /* PromptLauncherCommandRunner.swift */; };
 		D4A100010000000000000006 /* PromptLauncherEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4A100020000000000000006 /* PromptLauncherEnvironment.swift */; };
 		D4A100010000000000000001 /* PromptLauncherModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4A100020000000000000001 /* PromptLauncherModel.swift */; };
@@ -2989,6 +2991,8 @@
 		A5001645 /* RemoteSessionBundledResourceLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5001644 /* RemoteSessionBundledResourceLoader.swift */; };
 		B9000029A1B2C3D4E5F60719 /* RemoteSessionBundledResourceLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5001644 /* RemoteSessionBundledResourceLoader.swift */; };
 		806100020000000000000001 /* RemoteSessionCleanupLifecycleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 806100020000000000000002 /* RemoteSessionCleanupLifecycleTests.swift */; };
+		7A0A57A70000000000000003 /* RemoteSessionNetworkPathMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A0A57A70000000000000004 /* RemoteSessionNetworkPathMonitor.swift */; };
+		7A0A57A70000000000000007 /* RemoteSessionNetworkPathMonitorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A0A57A70000000000000008 /* RemoteSessionNetworkPathMonitorTests.swift */; };
 		C12813000000000000000111 /* RemoteSessionParkedReconnectTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C12813000000000000000102 /* RemoteSessionParkedReconnectTests.swift */; };
 		797800020000000000000001 /* RemoteSessionPowerObserver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 797800020000000000000002 /* RemoteSessionPowerObserver.swift */; };
 		EE30D6000000000000000006 /* RemoteSessionStrings+App.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE30D6000000000000000005 /* RemoteSessionStrings+App.swift */; };
@@ -7558,6 +7562,8 @@
 		A5C0DE0000000000000000B3 /* ProjectPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Panels/ProjectPanelView.swift; sourceTree = "<group>"; };
 		A5C0DE0000000000000000BB /* ProjectSchemesTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Panels/ProjectSchemesTabView.swift; sourceTree = "<group>"; };
 		A5C0DE0000000000000000B7 /* ProjectTargetsTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Panels/ProjectTargetsTabView.swift; sourceTree = "<group>"; };
+		7A0A57A70000000000000002 /* PromptLauncherAutoRestartCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App/PromptLauncherAutoRestartCoordinator.swift; sourceTree = "<group>"; };
+		7A0A57A70000000000000006 /* PromptLauncherAutoRestartCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PromptLauncherAutoRestartCoordinatorTests.swift; sourceTree = "<group>"; };
 		D4A100020000000000000005 /* PromptLauncherCommandRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sidebar/PromptLauncherCommandRunner.swift; sourceTree = "<group>"; };
 		D4A100020000000000000006 /* PromptLauncherEnvironment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sidebar/PromptLauncherEnvironment.swift; sourceTree = "<group>"; };
 		D4A100020000000000000001 /* PromptLauncherModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sidebar/PromptLauncherModel.swift; sourceTree = "<group>"; };
@@ -7601,6 +7607,8 @@
 		C15873000000000000000003 /* RemotesArgumentParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemotesArgumentParser.swift; sourceTree = "<group>"; };
 		A5001644 /* RemoteSessionBundledResourceLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteSessionBundledResourceLoader.swift; sourceTree = "<group>"; };
 		806100020000000000000002 /* RemoteSessionCleanupLifecycleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteSessionCleanupLifecycleTests.swift; sourceTree = "<group>"; };
+		7A0A57A70000000000000004 /* RemoteSessionNetworkPathMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App/RemoteSessionNetworkPathMonitor.swift; sourceTree = "<group>"; };
+		7A0A57A70000000000000008 /* RemoteSessionNetworkPathMonitorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteSessionNetworkPathMonitorTests.swift; sourceTree = "<group>"; };
 		C12813000000000000000102 /* RemoteSessionParkedReconnectTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemoteSessionParkedReconnectTests.swift; sourceTree = "<group>"; };
 		797800020000000000000002 /* RemoteSessionPowerObserver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App/RemoteSessionPowerObserver.swift; sourceTree = "<group>"; };
 		EE30D6000000000000000005 /* RemoteSessionStrings+App.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "RemoteSessionStrings+App.swift"; sourceTree = "<group>"; };
@@ -11533,6 +11541,8 @@
 				AFCC9778635E9E3CEDEEF2BC /* SessionScrollbackCheckpoint.swift */,
 				797800010000000000000002 /* AppDelegate+RemoteSessionPower.swift */,
 				797800020000000000000002 /* RemoteSessionPowerObserver.swift */,
+				7A0A57A70000000000000004 /* RemoteSessionNetworkPathMonitor.swift */,
+				7A0A57A70000000000000002 /* PromptLauncherAutoRestartCoordinator.swift */,
 				C0DE74140000000000000002 /* AppDelegate+SavedLayoutMenu.swift */,
 				4EDE10010000000000000002 /* AppDelegate+NotificationDeliverySeams.swift */,
 				2907B0022907B0022907B002 /* AppDelegate+NotificationNavSeams.swift */,
@@ -13073,6 +13083,8 @@
 				DE71CE000000000000000001 /* DeviceRegistryClientTests.swift */,
 				DE71CE000000000000000009 /* PresenceHeartbeatClientTests.swift */,
 				DE71CE000000000000000005 /* MobileHostNetworkPathRefreshTests.swift */,
+				7A0A57A70000000000000008 /* RemoteSessionNetworkPathMonitorTests.swift */,
+				7A0A57A70000000000000006 /* PromptLauncherAutoRestartCoordinatorTests.swift */,
 				AA5269A0C0DE0003FACE0003 /* ForeignFirstResponderPolicyTests.swift */,
 				F1C1AA20B7E84D10A1C10001 /* InactivePaneFirstClickFocusTests.swift */,
 				FA000001A1B2C3D4E5F60718 /* WorkspaceStressProfileTests.swift */,
@@ -16455,6 +16467,7 @@
 					A5C0DE0000000000000000B4 /* ProjectPanelView.swift in Sources */,
 					A5C0DE0000000000000000BC /* ProjectSchemesTabView.swift in Sources */,
 					A5C0DE0000000000000000B8 /* ProjectTargetsTabView.swift in Sources */,
+				7A0A57A70000000000000001 /* PromptLauncherAutoRestartCoordinator.swift in Sources */,
 				D4A100010000000000000005 /* PromptLauncherCommandRunner.swift in Sources */,
 				D4A100010000000000000006 /* PromptLauncherEnvironment.swift in Sources */,
 				D4A100010000000000000001 /* PromptLauncherModel.swift in Sources */,
@@ -16483,6 +16496,7 @@
 				E30790000000000000000004 /* RemotePTYBridgeStrings+App.swift in Sources */,
 				A5001640 /* RemoteRelayZshBootstrap.swift in Sources */,
 				A5001645 /* RemoteSessionBundledResourceLoader.swift in Sources */,
+				7A0A57A70000000000000003 /* RemoteSessionNetworkPathMonitor.swift in Sources */,
 				797800020000000000000001 /* RemoteSessionPowerObserver.swift in Sources */,
 				EE30D6000000000000000006 /* RemoteSessionStrings+App.swift in Sources */,
 				E4321000E4321000E4321001 /* RemoteShellSessionParsing.swift in Sources */,
@@ -18945,6 +18959,7 @@
 				AC0FCEFB6665CF134634D60B /* ProcessExitWait.swift in Sources */,
 				C47110010000000000000001 /* ProcessPipeReadCrashRegressionTests.swift in Sources */,
 				0A327C88E531C7E407CEF58C /* ProcessSnapshotMeasurement.swift in Sources */,
+				7A0A57A70000000000000005 /* PromptLauncherAutoRestartCoordinatorTests.swift in Sources */,
 				A64610020000000000000001 /* QuitConfirmationAlertPresenterTests.swift in Sources */,
 				5C0C4A1E0000000000000003 /* RCChannelIdentityTests.swift in Sources */,
 				5C0C4A1E0000000000000005 /* RCChannelSuiteTests.swift in Sources */,
@@ -18959,6 +18974,7 @@
 				B11049000000000000000003 /* RemoteRelayTmuxCompatAuthorizationTests.swift in Sources */,
 				7989A0017989A0017989A001 /* RemoteResumeBindingTests.swift in Sources */,
 				806100020000000000000001 /* RemoteSessionCleanupLifecycleTests.swift in Sources */,
+				7A0A57A70000000000000007 /* RemoteSessionNetworkPathMonitorTests.swift in Sources */,
 				C12813000000000000000111 /* RemoteSessionParkedReconnectTests.swift in Sources */,
 				C0F674600000000000000001 /* RemoteShellCWDRelayTests.swift in Sources */,
 				8126B1C2D3E4F5061728394A /* RemoteShellPromptRelayTests.swift in Sources */,

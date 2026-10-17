@@ -538,8 +538,15 @@ struct CmuxPromptLauncherDefinition: Codable, Sendable, Hashable {
     var metadataPrefix: String?
     var closeHook: String?
     var restartHook: String?
+    /// Run instead of `restartHook` when cmux restores a remote workspace on
+    /// its own (wake, network change, dropped SSH pane). Exit 0 means healthy
+    /// or restored, 3 not managed by the hook, 75 temporarily unreachable.
+    var autoRestartHook: String?
+    var autoRestartGraceSeconds: Double
     var environment: [String: String]
     var forwardCmuxSocket: Bool
+
+    static let defaultAutoRestartGraceSeconds: Double = 8
 
     private enum CodingKeys: String, CodingKey {
         case command
@@ -556,6 +563,8 @@ struct CmuxPromptLauncherDefinition: Codable, Sendable, Hashable {
         case metadataLinePrefix
         case closeHook
         case restartHook
+        case autoRestartHook
+        case autoRestartGraceSeconds
         case environment
         case forwardCmuxSocket
     }
@@ -572,6 +581,8 @@ struct CmuxPromptLauncherDefinition: Codable, Sendable, Hashable {
         metadataPrefix: String? = nil,
         closeHook: String? = nil,
         restartHook: String? = nil,
+        autoRestartHook: String? = nil,
+        autoRestartGraceSeconds: Double = Self.defaultAutoRestartGraceSeconds,
         environment: [String: String] = [:],
         forwardCmuxSocket: Bool = true
     ) {
@@ -586,6 +597,8 @@ struct CmuxPromptLauncherDefinition: Codable, Sendable, Hashable {
         self.metadataPrefix = metadataPrefix
         self.closeHook = closeHook
         self.restartHook = restartHook
+        self.autoRestartHook = autoRestartHook
+        self.autoRestartGraceSeconds = autoRestartGraceSeconds
         self.environment = environment
         self.forwardCmuxSocket = forwardCmuxSocket
     }
@@ -674,6 +687,9 @@ struct CmuxPromptLauncherDefinition: Codable, Sendable, Hashable {
             ?? Self.trimmedString(forKey: .metadataLinePrefix, in: container)
         closeHook = try Self.trimmedString(forKey: .closeHook, in: container)
         restartHook = try Self.trimmedString(forKey: .restartHook, in: container)
+        autoRestartHook = try Self.trimmedString(forKey: .autoRestartHook, in: container)
+        let decodedGrace = try container.decodeIfPresent(Double.self, forKey: .autoRestartGraceSeconds)
+        autoRestartGraceSeconds = max(0, decodedGrace ?? Self.defaultAutoRestartGraceSeconds)
         let decodedEnvironment = try container.decodeIfPresent([String: String].self, forKey: .environment) ?? [:]
         environment = decodedEnvironment.reduce(into: [:]) { result, item in
             let key = item.key.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -696,6 +712,8 @@ struct CmuxPromptLauncherDefinition: Codable, Sendable, Hashable {
         try container.encodeIfPresent(metadataPrefix, forKey: .metadataPrefix)
         try container.encodeIfPresent(closeHook, forKey: .closeHook)
         try container.encodeIfPresent(restartHook, forKey: .restartHook)
+        try container.encodeIfPresent(autoRestartHook, forKey: .autoRestartHook)
+        try container.encode(autoRestartGraceSeconds, forKey: .autoRestartGraceSeconds)
         try container.encode(environment, forKey: .environment)
         try container.encode(forwardCmuxSocket, forKey: .forwardCmuxSocket)
     }
@@ -741,6 +759,10 @@ struct CmuxPromptLauncherDefinition: Codable, Sendable, Hashable {
         }
         if let restartHook {
             parts.append("restartHook: \(restartHook)")
+        }
+        if let autoRestartHook {
+            parts.append("autoRestartHook: \(autoRestartHook)")
+            parts.append("autoRestartGraceSeconds: \(autoRestartGraceSeconds)")
         }
         if !environment.isEmpty {
             let environmentDescription = environment.keys.sorted()

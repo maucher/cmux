@@ -79,6 +79,14 @@ enum SidebarPromptLauncherTemplateRenderer {
     }
 
     @MainActor
+    static func renderAutoRestartHook(
+        config: CmuxPromptLauncherDefinition,
+        workspace: Workspace
+    ) -> String? {
+        renderWorkspaceHook(config.autoRestartHook, workspace: workspace)
+    }
+
+    @MainActor
     private static func renderWorkspaceHook(_ hook: String?, workspace: Workspace) -> String? {
         guard let hook else { return nil }
         let slot = workspace.promptLauncherSlot ?? defaultSlot(fromWorkspaceTitle: workspace.title)

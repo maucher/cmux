@@ -3324,7 +3324,17 @@ final class Workspace: Identifiable, ObservableObject, FilePreviewTabMetadataHos
     }
     /// The workspace-owned state for the latest failed cloud terminal creation request.
     @MainActor let cloudPaneCreationFailureStore = CloudPaneCreationFailureStore()
-    @Published var remoteConnectionState: WorkspaceRemoteConnectionState = .disconnected
+    @Published var remoteConnectionState: WorkspaceRemoteConnectionState = .disconnected {
+        didSet {
+            guard oldValue != remoteConnectionState,
+                  remoteConnectionState == .error || remoteConnectionState == .suspended else { return }
+            // cmux stopped reconnecting on its own; let the prompt launcher restore it.
+            let workspaceId = id
+            Task { @MainActor in
+                AppDelegate.shared?.promptLauncherAutoRestartCoordinator?.noteRemoteConnectionLost(workspaceId: workspaceId)
+            }
+        }
+    }
     @Published var remoteConnectionDetail: String?
     // Unsuppressed controller truth retained while live terminal liveness
     // temporarily owns the published presentation above.

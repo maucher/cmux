@@ -2868,6 +2868,8 @@ class TabManager: ObservableObject {
 
     func restartSessionFromCard(_ workspace: Workspace) {
         guard !promptLauncherRestartWorkspaceIds.contains(workspace.id) else { return }
+        // An explicit click supersedes any queued automatic retry.
+        AppDelegate.shared?.promptLauncherAutoRestartCoordinator?.cancelPending(workspaceId: workspace.id)
         guard let cmuxConfigStore,
               let promptLauncher = cmuxConfigStore.promptLauncher,
               let shellCommand = SidebarPromptLauncherTemplateRenderer.renderRestartHook(
@@ -2918,6 +2920,78 @@ class TabManager: ObservableObject {
             }
             workspace.isSessionRestartingFromCard = false
         }
+    }
+
+    /// Remote workspaces in this window that have a trusted `autoRestartHook`.
+    func promptLauncherAutoRestartWorkspaceIds() -> [UUID] {
+        guard let cmuxConfigStore,
+              let promptLauncher = cmuxConfigStore.promptLauncher,
+              promptLauncher.autoRestartHook != nil,
+              CmuxConfigExecutor.isPromptLauncherTrusted(
+                  promptLauncher,
+                  configSourcePath: cmuxConfigStore.promptLauncherSourcePath,
+                  globalConfigPath: cmuxConfigStore.globalConfigPath
+              ) else {
+            return []
+        }
+        return tabs.filter(\.isRemoteWorkspace).map(\.id)
+    }
+
+    /// Runs `autoRestartHook` for one open remote workspace and returns its
+    /// exit status. Returns nil when the workspace is gone, no trusted hook is
+    /// configured, or a restart is already running. Unlike the card button it
+    /// never falls back to a local respawn: on a dead remote that would only
+    /// leave a broken local shell in the pane.
+    func runPromptLauncherAutoRestartHook(workspaceId: UUID) async -> Int32? {
+        guard !promptLauncherRestartWorkspaceIds.contains(workspaceId),
+              let workspace = tabs.first(where: { $0.id == workspaceId }),
+              workspace.isRemoteWorkspace,
+              let cmuxConfigStore,
+              let promptLauncher = cmuxConfigStore.promptLauncher,
+              let shellCommand = SidebarPromptLauncherTemplateRenderer.renderAutoRestartHook(
+                  config: promptLauncher,
+                  workspace: workspace
+              ),
+              CmuxConfigExecutor.isPromptLauncherTrusted(
+                  promptLauncher,
+                  configSourcePath: cmuxConfigStore.promptLauncherSourcePath,
+                  globalConfigPath: cmuxConfigStore.globalConfigPath
+              ) else {
+            return nil
+        }
+        promptLauncherRestartWorkspaceIds.insert(workspaceId)
+        defer { promptLauncherRestartWorkspaceIds.remove(workspaceId) }
+        let environment = promptLauncher.environment
+        let forwardedSocketPath = promptLauncher.forwardCmuxSocket
+            ? TerminalController.shared.currentSocketPathForRemoteRestore()
+            : nil
+        return await Task.detached(priority: .utility) {
+            let process = Self.promptLauncherHookProcess(
+                shellCommand: shellCommand,
+                environment: environment,
+                forwardedSocketPath: forwardedSocketPath,
+                discardsOutput: true
+            )
+            do {
+                try process.run()
+                process.waitUntilExit()
+                return process.terminationStatus
+            } catch {
+                return 1
+            }
+        }.value
+    }
+
+    func showPromptLauncherAutoRestartGaveUp(workspaceId: UUID) {
+        guard let workspace = tabs.first(where: { $0.id == workspaceId }) else { return }
+        workspace.statusEntries["session"] = SidebarStatusEntry(
+            key: "session",
+            value: String(
+                localized: "sidebar.prompt_launcher.autoRestartFailed",
+                defaultValue: "Auto-restart failed; click restart"
+            ),
+            icon: "exclamationmark.triangle"
+        )
     }
 
     nonisolated private static func promptLauncherHookProcess(
@@ -3819,6 +3893,9 @@ class TabManager: ObservableObject {
             return
         }
         if let runtimeSurface, tab.terminalPanel(for: surfaceId)?.surface !== runtimeSurface { return }
+        if tab.isRemoteWorkspace {
+            AppDelegate.shared?.promptLauncherAutoRestartCoordinator?.noteRemoteSurfaceDropped(workspaceId: tab.id)
+        }
         let ownsRemoteChildExit = tab.isRemoteTerminalSurface(surfaceId) ||
             tab.pendingRemoteTerminalChildExitSurfaceIds.contains(surfaceId) || tab.remoteDisconnectPlaceholderPanelIds.contains(surfaceId)
         let keepsPersistentRemoteSurfaceOpen =
