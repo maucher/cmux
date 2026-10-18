@@ -47,20 +47,20 @@ struct SidebarPromptLauncher: View {
     var body: some View {
         @Bindable var model = tabManager.promptLauncherModel
         return Group {
-            if let config = cmuxConfigStore.promptLauncher {
-                let repositoryID = config.repositories.contains(where: { $0.id == model.selectedRepository })
-                    ? model.selectedRepository
-                    : config.selectedDefaultRepositoryID
-                let availableTargets = config.targets(forRepositoryID: repositoryID)
+            if let config = cmuxConfigStore.promptLauncher?.applyingProjects(cmuxConfigStore.projects) {
+                let projectID = config.repositories.contains(where: { $0.id == model.selectedProject })
+                    ? model.selectedProject
+                    : config.selectedDefaultProjectID
+                let availableTargets = config.targets(forProjectID: projectID)
                 let targetID = config.targets.contains(where: { $0.id == model.selectedTarget })
                     ? model.selectedTarget
-                    : config.selectedDefaultTargetID(forRepositoryID: repositoryID)
+                    : config.selectedDefaultTargetID(forProjectID: projectID)
                 let providerID = config.providers.contains(where: { $0.id == model.selectedProvider })
                     ? model.selectedProvider
                     : config.selectedDefaultProviderID
-                let defaultTargetID = config.selectedDefaultTargetID(forRepositoryID: config.selectedDefaultRepositoryID)
+                let defaultTargetID = config.selectedDefaultTargetID(forProjectID: config.selectedDefaultProjectID)
                 let isOnDefaultTarget = targetID == defaultTargetID
-                    && repositoryID == config.selectedDefaultRepositoryID
+                    && projectID == config.selectedDefaultProjectID
 
                 let isTargetSupported = model.isTargetSupported(config)
                 let canSend = isTargetSupported
@@ -92,8 +92,8 @@ struct SidebarPromptLauncher: View {
                 }
                 .buttonStyle(.plain)
                 .fixedSize()
-                .help(String(localized: "sidebar.prompt_launcher.autoTargetHelp",
-                             defaultValue: "Reset to the default target and repository"))
+                .help(String(localized: "sidebar.prompt_launcher.autoTargetProjectHelp",
+                             defaultValue: "Reset to the default target and project"))
                 .accessibilityLabel(
                     String(localized: "sidebar.prompt_launcher.autoTarget", defaultValue: "Auto target")
                 )
@@ -114,8 +114,8 @@ struct SidebarPromptLauncher: View {
                 let agentControl = providerMenu(choices: config.providers, selectedID: providerID) {
                     model.selectedProvider = $0
                 }
-                let repositoryControl = repositoryMenu(choices: config.repositories, selectedID: repositoryID) {
-                    model.selectRepository($0)
+                let projectControl = projectMenu(choices: config.repositories, selectedID: projectID) {
+                    model.selectProject($0)
                 }
                 let sendControl = sendButton(isEnabled: canSend, action: submit)
 
@@ -147,7 +147,7 @@ struct SidebarPromptLauncher: View {
                                 .frame(minWidth: 0, maxWidth: 62)
                             agentControl
                                 .frame(minWidth: 0, maxWidth: 66)
-                            if !config.repositories.isEmpty { repositoryControl }
+                            if !config.repositories.isEmpty { projectControl }
                             sendControl.fixedSize()
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -155,8 +155,8 @@ struct SidebarPromptLauncher: View {
 
                         if !isTargetSupported {
                             Text(String(
-                                localized: "sidebar.prompt_launcher.unsupportedEnvironment",
-                                defaultValue: "Choose an environment supported by this repository."
+                                localized: "sidebar.prompt_launcher.unsupportedProjectEnvironment",
+                                defaultValue: "Choose an environment supported by this project."
                             ))
                             .font(.system(size: 10))
                             .foregroundStyle(.secondary)
@@ -228,11 +228,11 @@ struct SidebarPromptLauncher: View {
         )
     }
 
-    private func repositoryMenu(
+    private func projectMenu(
         choices: [CmuxPromptLauncherChoice], selectedID: String, select: @escaping (String) -> Void
     ) -> some View {
         choiceMenu(
-            title: String(localized: "sidebar.prompt_launcher.repoLabel", defaultValue: "REPO"),
+            title: String(localized: "sidebar.prompt_launcher.projectLabel", defaultValue: "PROJECT"),
             choices: choices, selectedID: selectedID, select: select
         )
     }

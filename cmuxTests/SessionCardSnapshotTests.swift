@@ -85,18 +85,34 @@ struct SessionCardSnapshotTests {
         )
     }
 
-    @Test func lifecycleGroupsPrioritizePinnedAndAttentionStates() {
-        #expect(SessionCardGroup.resolveID(status: .working, isPinned: true, configured: []) == "pinned")
-        #expect(SessionCardGroup.resolveID(status: .needsInput, isPinned: false, configured: []) == "needsAttention")
-        #expect(SessionCardGroup.resolveID(status: .working, isPinned: false, configured: []) == "running")
-        #expect(SessionCardGroup.resolveID(status: .done, isPinned: false, configured: []) == "finished")
-        #expect(SessionCardGroup.resolveID(status: .exited, isPinned: false, configured: []) == "finished")
+    private static let projects = [
+        CmuxProjectDefinition(id: "backend", title: "Backend"),
+        CmuxProjectDefinition(id: "docs", title: "Docs"),
+        CmuxProjectDefinition(id: "pinned", title: "Local"),
+    ]
+
+    @Test func projectGroupsResolvePinnedConfiguredAndOther() {
+        let projects = Self.projects
+        #expect(SessionCardGroup.resolveID(projectId: "backend", isPinned: true, projects: projects) == "pinned")
+        #expect(SessionCardGroup.resolveID(projectId: "pinned", isPinned: false, projects: projects) == "pinned")
+        #expect(SessionCardGroup.resolveID(projectId: "docs", isPinned: false, projects: projects) == "docs")
+        #expect(SessionCardGroup.resolveID(projectId: nil, isPinned: false, projects: projects) == "other")
+        #expect(SessionCardGroup.resolveID(projectId: "missing", isPinned: false, projects: projects) == "other")
+        #expect(SessionCardGroup.resolveID(projectId: "other", isPinned: false, projects: []) == "other")
+        #expect(SessionCardGroup.resolveID(projectId: nil, isPinned: true, projects: []) == "pinned")
+    }
+
+    @Test func projectGroupsOrderPinnedFirstThenConfigOrderThenOther() {
+        let groups = SessionCardGroup.groups(projects: Self.projects)
+        #expect(groups.map(\.id) == ["pinned", "backend", "docs", "other"])
+        #expect(groups.first?.title == "Local")
+        #expect(SessionCardGroup.groups(projects: []).map(\.id) == ["pinned", "other"])
     }
 
     @MainActor
     @Test func sessionListProjectionIncludesHeadersAndHidesCollapsedRows() {
         let pinnedWorkspaceID = UUID()
-        let runningWorkspaceID = UUID()
+        let backendWorkspaceID = UUID()
         let rows = [
             SidebarSessionRowSnapshot(
                 id: pinnedWorkspaceID,
@@ -104,24 +120,60 @@ struct SessionCardSnapshotTests {
                 groupID: SessionCardGroup.pinnedID
             ),
             SidebarSessionRowSnapshot(
-                id: runningWorkspaceID,
+                id: backendWorkspaceID,
                 status: .working,
-                groupID: "running"
+                groupID: "backend"
             ),
         ]
 
         let items = SidebarSessionListItem.renderItems(
-            groups: SessionCardGroup.groups(configured: []),
+            groups: SessionCardGroup.groups(projects: Self.projects),
             rows: rows,
-            collapsedGroupIDs: ["running"]
+            collapsedGroupIDs: ["backend"]
         )
 
         #expect(items.map(\.id) == [
             .group(SessionCardGroup.pinnedID),
             .workspace(pinnedWorkspaceID),
-            .group("running"),
+            .group("backend"),
         ])
         #expect(items.visibleWorkspaceIDs == [pinnedWorkspaceID])
+    }
+
+    @MainActor
+    @Test func sessionListProjectionHidesEmptyGroupsAndKeepsTabOrder() {
+        let first = UUID()
+        let second = UUID()
+        let third = UUID()
+        let rows = [
+            SidebarSessionRowSnapshot(id: first, status: .done, groupID: "other"),
+            SidebarSessionRowSnapshot(id: second, status: .working, groupID: "docs"),
+            SidebarSessionRowSnapshot(id: third, status: .needsInput, groupID: "other"),
+        ]
+
+        let items = SidebarSessionListItem.renderItems(
+            groups: SessionCardGroup.groups(projects: Self.projects),
+            rows: rows,
+            collapsedGroupIDs: []
+        )
+
+        #expect(items.map(\.id) == [
+            .group("docs"),
+            .workspace(second),
+            .group("other"),
+            .workspace(first),
+            .workspace(third),
+        ])
+    }
+
+    @MainActor
+    @Test func workspaceRowUsesProjectMembership() {
+        let workspace = Workspace()
+        workspace.projectId = "docs"
+        let row = SidebarSessionRowSnapshot(workspace: workspace, status: .working, projects: Self.projects)
+        #expect(row.groupID == "docs")
+        workspace.isPinned = true
+        #expect(SidebarSessionRowSnapshot(workspace: workspace, status: .working, projects: Self.projects).groupID == "pinned")
     }
 
     @Test func appKitSidebarPreservesCustomSessionCardPresentation() {

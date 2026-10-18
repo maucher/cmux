@@ -146,7 +146,7 @@ final class PromptLauncherAutoRestartCoordinator {
     func noteNetworkRestored() {
         guard !isSuspended else { return }
         // A host that stayed unreachable leaves cmux's own reconnect suspended;
-        // re-arm it before giving ws a chance.
+        // re-arm it before running the hook.
         rearmNativeReconnect()
         waitingForNetwork.removeAll()
         let delay = graceSeconds()

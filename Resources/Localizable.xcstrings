@@ -658354,12 +658354,12 @@
     "sidebar.prompt_launcher.sendHint": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "⌘↵ to send"}}, "ja": {"stringUnit": {"state": "translated", "value": "⌘↵ で送信"}}}},
     "sidebar.prompt_launcher.environmentLabel": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "ENV"}}, "ja": {"stringUnit": {"state": "translated", "value": "環境"}}}},
     "sidebar.prompt_launcher.agentLabel": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "AGENT"}}, "ja": {"stringUnit": {"state": "translated", "value": "エージェント"}}}},
-    "sidebar.prompt_launcher.repoLabel": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "REPO"}}, "ja": {"stringUnit": {"state": "translated", "value": "リポジトリ"}}}},
-    "sidebar.prompt_launcher.unsupportedEnvironment": {
+    "sidebar.prompt_launcher.projectLabel": {"extractionState": "manual", "localizations": {"en": {"stringUnit": {"state": "translated", "value": "PROJECT"}}, "ja": {"stringUnit": {"state": "translated", "value": "プロジェクト"}}}},
+    "sidebar.prompt_launcher.unsupportedProjectEnvironment": {
       "extractionState": "manual",
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "Choose an environment supported by this repository." } },
-        "ja": { "stringUnit": { "state": "translated", "value": "このリポジトリで使用できる環境を選択してください。" } }
+        "en": { "stringUnit": { "state": "translated", "value": "Choose an environment supported by this project." } },
+        "ja": { "stringUnit": { "state": "translated", "value": "このプロジェクトで使用できる環境を選択してください。" } }
       }
     },
     "sidebar.prompt_launcher.placeholder": {
@@ -658396,11 +658396,11 @@
         }
       }
     },
-    "sidebar.prompt_launcher.autoTargetHelp": {
+    "sidebar.prompt_launcher.autoTargetProjectHelp": {
       "extractionState": "manual",
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "Reset to the default target and repository" } },
-        "ja": { "stringUnit": { "state": "translated", "value": "既定のターゲットとリポジトリに戻す" } }
+        "en": { "stringUnit": { "state": "translated", "value": "Reset to the default target and project" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "既定のターゲットとプロジェクトに戻す" } }
       }
     },
     "sidebar.prompt_launcher.repository": {
@@ -658823,13 +658823,6 @@
         "ja": { "stringUnit": { "state": "translated", "value": "展開" } }
       }
     },
-    "sidebar.sessionGroup.finished": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "Finished" } },
-        "ja": { "stringUnit": { "state": "translated", "value": "完了" } }
-      }
-    },
     "sidebar.sessionGroup.needsAttention": {
       "extractionState": "manual",
       "localizations": {
@@ -658849,13 +658842,6 @@
       "localizations": {
         "en": { "stringUnit": { "state": "translated", "value": "Pinned" } },
         "ja": { "stringUnit": { "state": "translated", "value": "ピン留め" } }
-      }
-    },
-    "sidebar.sessionGroup.running": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "Running" } },
-        "ja": { "stringUnit": { "state": "translated", "value": "実行中" } }
       }
     }
   },

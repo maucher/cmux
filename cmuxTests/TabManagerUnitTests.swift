@@ -4931,49 +4931,44 @@ final class TabManagerSidebarCycleOrderTests: XCTestCase {
     }
 
     func testTabCyclingFollowsGroupedSidebarOrderWithoutVisibleOrderFeed() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cmux-cycle-projects-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let projectsPath = directory.appendingPathComponent("projects.json").path
+        try Data(#"{"projects": [{"id": "backend"}, {"id": "docs"}]}"#.utf8)
+            .write(to: URL(fileURLWithPath: projectsPath))
+        let store = CmuxConfigStore(
+            globalConfigPath: directory.appendingPathComponent("cmux.json").path,
+            projectsConfigPath: projectsPath
+        )
+        store.loadAll()
+
         let manager = TabManager()
+        manager.cmuxConfigStore = store
         let defaultWorkspace = manager.tabs[0]
+        let docsWorkspace = manager.addWorkspace()
+        let backendWorkspace = manager.addWorkspace()
         let pinnedWorkspace = manager.addWorkspace()
-        let runningWorkspace = manager.addWorkspace()
-        let finishedWorkspace = manager.addWorkspace()
-
+        docsWorkspace.projectId = "docs"
+        backendWorkspace.projectId = "backend"
         pinnedWorkspace.isPinned = true
-        let pinnedPanelID = try XCTUnwrap(pinnedWorkspace.focusedPanelId)
-        pinnedWorkspace.setAgentLifecycle(key: "codex", panelId: pinnedPanelID, lifecycle: .running)
 
-        let runningPanelID = try XCTUnwrap(runningWorkspace.focusedPanelId)
-        runningWorkspace.setAgentLifecycle(key: "codex", panelId: runningPanelID, lifecycle: .running)
-
-        let finishedPanelID = try XCTUnwrap(finishedWorkspace.focusedPanelId)
-        finishedWorkspace.setAgentLifecycle(key: "codex", panelId: finishedPanelID, lifecycle: .idle)
-
-        manager.selectWorkspace(defaultWorkspace)
+        manager.selectWorkspace(pinnedWorkspace)
         manager.selectNextTab()
         XCTAssertEqual(
             manager.selectedTabId,
-            finishedWorkspace.id,
-            "Cycling should follow grouped sidebar order (finished after default), not flat tab order"
+            backendWorkspace.id,
+            "Cycling should follow project group order (Pinned, then configured projects), not flat tab order"
         )
 
-        manager.selectPreviousTab()
-        XCTAssertEqual(
-            manager.selectedTabId,
-            defaultWorkspace.id,
-            "Previous should move up grouped sidebar order to the prior finished row"
-        )
+        manager.selectNextTab()
+        XCTAssertEqual(manager.selectedTabId, docsWorkspace.id, "Projects follow config order")
+
+        manager.selectNextTab()
+        XCTAssertEqual(manager.selectedTabId, defaultWorkspace.id, "Workspaces without a project come last (Other)")
 
         manager.selectPreviousTab()
-        XCTAssertEqual(
-            manager.selectedTabId,
-            runningWorkspace.id,
-            "Previous should reach the running section in grouped order"
-        )
-
-        manager.selectPreviousTab()
-        XCTAssertEqual(
-            manager.selectedTabId,
-            pinnedWorkspace.id,
-            "Previous should reach the pinned section before flat tab order would"
-        )
+        XCTAssertEqual(manager.selectedTabId, docsWorkspace.id)
     }
 }

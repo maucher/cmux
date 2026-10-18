@@ -17,7 +17,7 @@ import CmuxSidebar
         let prompt: String
         let targetID: String
         let providerID: String
-        let repositoryID: String?
+        let projectID: String?
         var state: State
         var latestLine: String
         var workspaceID: UUID?
@@ -44,7 +44,7 @@ import CmuxSidebar
     var promptText = ""
     var selectedTarget = ""
     var selectedProvider = ""
-    var selectedRepository = ""
+    var selectedProject = ""
     private(set) var jobs: [Job] = []
     private(set) var closeJobs: [CloseJob] = []
 
@@ -58,33 +58,52 @@ import CmuxSidebar
         self.commandRunner = commandRunner
     }
 
+    /// `config` is the effective launcher (see
+    /// ``CmuxPromptLauncherDefinition/applyingProjects(_:)``), whose
+    /// repository choices are the sidebar projects.
     func configure(_ config: CmuxPromptLauncherDefinition) {
         if !config.repositories.isEmpty,
-           !config.repositories.contains(where: { $0.id == selectedRepository }) {
-            selectedRepository = config.selectedDefaultRepositoryID
+           !config.repositories.contains(where: { $0.id == selectedProject }) {
+            selectedProject = config.selectedDefaultProjectID
         }
         if !config.targets.contains(where: { $0.id == selectedTarget }) {
             selectedTarget = config.repositories.isEmpty
                 ? config.selectedDefaultTargetID
-                : config.selectedDefaultTargetID(forRepositoryID: selectedRepository)
+                : config.selectedDefaultTargetID(forProjectID: selectedProject)
         }
         if !config.providers.contains(where: { $0.id == selectedProvider }) {
             selectedProvider = config.selectedDefaultProviderID
         }
     }
 
-    func selectRepository(_ repositoryID: String) {
-        selectedRepository = repositoryID
+    func selectProject(_ projectID: String) {
+        selectedProject = projectID
     }
 
     func resetDestination(_ config: CmuxPromptLauncherDefinition) {
-        selectedRepository = config.selectedDefaultRepositoryID
-        selectedTarget = config.selectedDefaultTargetID(forRepositoryID: selectedRepository)
+        selectedProject = config.selectedDefaultProjectID
+        selectedTarget = config.selectedDefaultTargetID(forProjectID: selectedProject)
     }
 
     func isTargetSupported(_ config: CmuxPromptLauncherDefinition) -> Bool {
-        config.targets(forRepositoryID: selectedRepository).contains { $0.id == selectedTarget }
+        config.targets(forProjectID: selectedProject).contains { $0.id == selectedTarget }
     }
+
+    /// Environment for the launch process: the launcher's configured
+    /// environment plus `CMUX_PROMPT_LAUNCHER_PROJECT` when a project is
+    /// selected, so the launcher script can default its project.
+    static func launchEnvironment(
+        config: CmuxPromptLauncherDefinition,
+        projectID: String?
+    ) -> [String: String] {
+        var environment = config.environment
+        if let projectID = projectID?.trimmingCharacters(in: .whitespacesAndNewlines), !projectID.isEmpty {
+            environment[Self.projectEnvironmentKey] = projectID
+        }
+        return environment
+    }
+
+    static let projectEnvironmentKey = "CMUX_PROMPT_LAUNCHER_PROJECT"
 
     func launch(
         config: CmuxPromptLauncherDefinition,
@@ -100,7 +119,7 @@ import CmuxSidebar
             prompt: prompt,
             targetID: selectedTarget,
             providerID: selectedProvider,
-            repositoryID: config.repositories.isEmpty ? nil : selectedRepository,
+            projectID: config.repositories.isEmpty ? nil : selectedProject,
             config: config,
             tabManager: tabManager,
             configSourcePath: configSourcePath,
@@ -120,7 +139,7 @@ import CmuxSidebar
             prompt: job.prompt,
             targetID: job.targetID,
             providerID: job.providerID,
-            repositoryID: job.repositoryID,
+            projectID: job.projectID,
             config: config,
             tabManager: tabManager,
             configSourcePath: configSourcePath,
@@ -169,7 +188,7 @@ import CmuxSidebar
         prompt: String,
         targetID: String,
         providerID: String,
-        repositoryID: String?,
+        projectID: String?,
         config: CmuxPromptLauncherDefinition,
         tabManager: TabManager,
         configSourcePath: String?,
@@ -179,7 +198,7 @@ import CmuxSidebar
             config: config,
             targetID: targetID,
             providerID: providerID,
-            repositoryID: repositoryID,
+            projectID: projectID,
             prompt: prompt
         ) else { return }
 
@@ -196,7 +215,7 @@ import CmuxSidebar
                 prompt: prompt,
                 targetID: targetID,
                 providerID: providerID,
-                repositoryID: repositoryID,
+                projectID: projectID,
                 tabManager: tabManager
             )
         }
@@ -208,7 +227,7 @@ import CmuxSidebar
         prompt: String,
         targetID: String,
         providerID: String,
-        repositoryID: String?,
+        projectID: String?,
         tabManager: TabManager
     ) {
         let jobID = UUID()
@@ -217,7 +236,7 @@ import CmuxSidebar
             prompt: prompt,
             targetID: targetID,
             providerID: providerID,
-            repositoryID: repositoryID,
+            projectID: projectID,
             state: .starting,
             latestLine: String(localized: "sidebar.prompt_launcher.starting", defaultValue: "Starting…"),
             workspaceID: nil,
@@ -231,7 +250,7 @@ import CmuxSidebar
             guard let self, let tabManager else { return }
             let stream = await commandRunner.events(
                 shellCommand: shellCommand,
-                environment: config.environment,
+                environment: Self.launchEnvironment(config: config, projectID: projectID),
                 forwardedSocketPath: config.forwardCmuxSocket ? SocketControlSettings.socketPath() : nil
             )
             var receivedTerminalEvent = false
@@ -408,6 +427,14 @@ import CmuxSidebar
         }
         if let slot = metadata.slot?.trimmingCharacters(in: .whitespacesAndNewlines), !slot.isEmpty {
             workspace.promptLauncherSlot = slot
+        }
+        // The job's project applies when the workspace first binds; later
+        // lines only change it through an explicit `project` key, so a
+        // manual reassignment during launch is not reverted.
+        let bindingJob = jobs.first(where: { $0.id == jobID && $0.workspaceID == nil })
+        if let projectID = metadata.project ?? bindingJob?.projectID,
+           workspace.projectId != projectID {
+            workspace.projectId = projectID
         }
         updateJob(jobID) { job in
             job.workspaceID = workspace.id

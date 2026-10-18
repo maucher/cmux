@@ -1,57 +1,47 @@
 import Foundation
 
-/// A collapsible sidebar section that groups sessions by their agent status.
+/// A collapsible sidebar section that groups sessions by project.
 struct SessionCardGroup: Equatable, Identifiable {
-    static let pinnedID = "pinned"
-    static let otherID = "other"
+    static let pinnedID = CmuxProjectDefinition.pinnedID
+    static let otherID = CmuxProjectDefinition.otherID
 
     let id: String
     let title: String
-    let statuses: Set<SessionCardSnapshot.Status>
 
     static let pinned = SessionCardGroup(
         id: pinnedID,
-        title: String(localized: "sidebar.sessionGroup.pinned", defaultValue: "Pinned"),
-        statuses: []
+        title: String(localized: "sidebar.sessionGroup.pinned", defaultValue: "Pinned")
     )
-
-    static let defaultStatusGroups = [
-        SessionCardGroup(
-            id: "needsAttention",
-            title: String(localized: "sidebar.sessionGroup.needsAttention", defaultValue: "Needs Attention"),
-            statuses: [.needsInput]
-        ),
-        SessionCardGroup(
-            id: "running",
-            title: String(localized: "sidebar.sessionGroup.running", defaultValue: "Running"),
-            statuses: [.working, .babysitting]
-        ),
-        SessionCardGroup(
-            id: "finished",
-            title: String(localized: "sidebar.sessionGroup.finished", defaultValue: "Finished"),
-            statuses: [.ready, .done, .exited]
-        ),
-    ]
 
     static let other = SessionCardGroup(
         id: otherID,
-        title: String(localized: "sidebar.sessionGroup.other", defaultValue: "Other"),
-        statuses: []
+        title: String(localized: "sidebar.sessionGroup.other", defaultValue: "Other")
     )
 
-    static func groups(configured: [SessionCardGroup]) -> [SessionCardGroup] {
-        [.pinned] + (configured.isEmpty ? defaultStatusGroups : configured) + [.other]
+    /// Pinned first, then configured projects in config order, then Other.
+    static func groups(projects: [CmuxProjectDefinition]) -> [SessionCardGroup] {
+        let pinnedProject = projects.first { $0.id == pinnedID }
+        let pinnedGroup = pinnedProject.map {
+            SessionCardGroup(id: pinnedID, title: $0.title)
+        } ?? .pinned
+        let projectGroups = projects
+            .filter { $0.id != pinnedID && $0.id != otherID }
+            .map { SessionCardGroup(id: $0.id, title: $0.title) }
+        return [pinnedGroup] + projectGroups + [.other]
     }
 
     static func resolveID(
-        status: SessionCardSnapshot.Status,
+        projectId: String?,
         isPinned: Bool,
-        configured: [SessionCardGroup]
+        projects: [CmuxProjectDefinition]
     ) -> String {
-        if isPinned {
+        if isPinned || projectId == pinnedID {
             return pinnedID
         }
-        let statusGroups = configured.isEmpty ? defaultStatusGroups : configured
-        return statusGroups.first(where: { $0.statuses.contains(status) })?.id ?? otherID
+        guard let projectId, projectId != otherID,
+              projects.contains(where: { $0.id == projectId }) else {
+            return otherID
+        }
+        return projectId
     }
 }

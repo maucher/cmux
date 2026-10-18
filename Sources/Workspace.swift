@@ -194,6 +194,8 @@ extension Workspace {
             isPinned: isPinned,
             isMuted: isMuted,
             groupId: groupId,
+            projectId: projectId,
+            promptLauncherSlot: promptLauncherSlot,
             isManuallyUnread: isWorkspaceManuallyUnread,
             hasUnreadIndicator: hasWorkspaceUnreadIndicator,
             notifications: workspaceNotificationSnapshots.isEmpty ? nil : workspaceNotificationSnapshots,
@@ -379,6 +381,8 @@ extension Workspace {
         isPinned = snapshot.isPinned
         isMuted = snapshot.isMuted ?? false
         groupId = snapshot.groupId
+        projectId = snapshot.projectId
+        promptLauncherSlot = snapshot.promptLauncherSlot
         restoreTodoState(from: snapshot)
 
         // Status entries and agent PIDs are ephemeral runtime state tied to running
@@ -2865,7 +2869,11 @@ final class Workspace: Identifiable, ObservableObject, FilePreviewTabMetadataHos
     /// Persisted in the session manifest and restored before surfaces are rebuilt.
     @Published var workspaceEnvironment: [String: String] = [:]
     /// Prompt-launcher slot (worktree/session id) bound to this workspace.
+    /// Persisted in the session manifest so hooks keep their slot after relaunch.
     var promptLauncherSlot: String?
+    /// Sidebar project this workspace belongs to (`projects.json` id). Unknown
+    /// or missing ids render in the "Other" group. Persisted in the session manifest.
+    @Published var projectId: String?
     // Legacy in-memory state for old helpers/tests. Product UI, rendering, and
     // session persistence no longer honor per-workspace scrollbar overrides.
     @Published private(set) var terminalScrollBarHidden: Bool = false

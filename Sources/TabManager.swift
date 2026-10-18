@@ -247,17 +247,17 @@ class TabManager: ObservableObject {
         sidebarVisibleOrder = workspaceIds
     }
 
-    /// Top-to-bottom sidebar order from the same status-group projection the
+    /// Top-to-bottom sidebar order from the same project-group projection the
     /// sidebar renders. Collapsed groups are ignored so keyboard cycling can
     /// reach every session regardless of renderer or sidebar visibility.
     private func groupedSidebarWorkspaceOrder() -> [UUID] {
-        let configuredGroups = cmuxConfigStore?.sessionStatusGroups ?? []
-        let sessionGroups = SessionCardGroup.groups(configured: configuredGroups)
+        let projects = cmuxConfigStore?.projects ?? []
+        let sessionGroups = SessionCardGroup.groups(projects: projects)
         let sessionRows = tabs.map {
             SidebarSessionRowSnapshot(
                 workspace: $0,
                 status: SessionCardSnapshot.Status.resolve(workspace: $0),
-                groups: configuredGroups
+                projects: projects
             )
         }
         return SidebarSessionListItem.renderItems(
@@ -6939,6 +6939,8 @@ extension TabManager {
         for workspace in tabs.prefix(SessionPersistencePolicy.maxWorkspacesPerWindow) {
             hasher.combine(workspace.id)
             hasher.combine(workspace.groupId)
+            hasher.combine(workspace.projectId ?? "")
+            hasher.combine(workspace.promptLauncherSlot ?? "")
             hasher.combine(workspace.focusedPanelId)
             hasher.combine(workspace.currentDirectory)
             hasher.combine(workspace.customTitle ?? "")

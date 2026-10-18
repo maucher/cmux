@@ -11473,12 +11473,6 @@ struct VerticalTabsSidebar: View, Equatable {
     @State private var extensionSidebarUpdateToken: UInt64 = 0
     @AppStorage("sidebar.sessionStatusGroup.pinned.collapsed")
     private var pinnedSessionGroupCollapsed = false
-    @AppStorage("sidebar.sessionStatusGroup.needsAttention.collapsed")
-    private var needsAttentionSessionGroupCollapsed = false
-    @AppStorage("sidebar.sessionStatusGroup.running.collapsed")
-    private var runningSessionGroupCollapsed = false
-    @AppStorage("sidebar.sessionStatusGroup.finished.collapsed")
-    private var finishedSessionGroupCollapsed = false
     @AppStorage("sidebar.sessionStatusGroups.collapsedIDs")
     private var customCollapsedSessionGroupIDs = ""
     // Stable, memoized merged observation publishers for the extension
@@ -11937,13 +11931,13 @@ struct VerticalTabsSidebar: View, Equatable {
             from: workspaceRenderItems
         )
         let visibleWorkspaceRowIds = workspaceRenderItems.map(\.rowWorkspaceId)
-        let configuredSessionGroups = cmuxConfigStore.sessionStatusGroups
-        let sessionGroups = SessionCardGroup.groups(configured: configuredSessionGroups)
+        let sidebarProjects = cmuxConfigStore.projects
+        let sessionGroups = SessionCardGroup.groups(projects: sidebarProjects)
         let sessionRows = tabs.map {
             SidebarSessionRowSnapshot(
                 workspace: $0,
                 status: SessionCardSnapshot.Status.resolve(workspace: $0),
-                groups: configuredSessionGroups
+                projects: sidebarProjects
             )
         }
         let collapsedSessionGroupIDs = Set(
@@ -11955,9 +11949,8 @@ struct VerticalTabsSidebar: View, Equatable {
             collapsedGroupIDs: collapsedSessionGroupIDs
         )
         // Keyboard cycling (⌥↑/↓) must be able to reach every session, not
-        // just the ones currently rendered — a collapsed group (e.g.
-        // "Finished") would otherwise silently remove its workspaces from
-        // the cycle order, which reads as "some sessions get skipped" when
+        // just the ones currently rendered — a collapsed project group would
+        // otherwise silently remove its workspaces from the cycle order, which reads as "some sessions get skipped" when
         // moving up/down. Render with no groups collapsed purely to compute
         // the full navigation order; the visually-rendered `sessionListItems`
         // above is untouched.
@@ -14640,9 +14633,6 @@ struct VerticalTabsSidebar: View, Equatable {
     private func isSessionGroupCollapsed(_ group: SessionCardGroup) -> Bool {
         switch group.id {
         case SessionCardGroup.pinnedID: pinnedSessionGroupCollapsed
-        case "needsAttention": needsAttentionSessionGroupCollapsed
-        case "running": runningSessionGroupCollapsed
-        case "finished": finishedSessionGroupCollapsed
         default: customCollapsedSessionGroupIDSet.contains(group.id)
         }
     }
@@ -14651,12 +14641,6 @@ struct VerticalTabsSidebar: View, Equatable {
         switch group.id {
         case SessionCardGroup.pinnedID:
             pinnedSessionGroupCollapsed.toggle()
-        case "needsAttention":
-            needsAttentionSessionGroupCollapsed.toggle()
-        case "running":
-            runningSessionGroupCollapsed.toggle()
-        case "finished":
-            finishedSessionGroupCollapsed.toggle()
         default:
             var ids = customCollapsedSessionGroupIDSet
             if !ids.insert(group.id).inserted { ids.remove(group.id) }

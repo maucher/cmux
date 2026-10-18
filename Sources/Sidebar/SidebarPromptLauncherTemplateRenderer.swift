@@ -11,6 +11,7 @@ struct SidebarPromptLauncherWorkspaceMetadata: Equatable {
     var description: String?
     var color: String?
     var slot: String?
+    var project: String? = nil
     var phase: Phase?
     var progress: String? = nil
 }
@@ -19,22 +20,24 @@ enum SidebarPromptLauncherTemplateRenderer {
         config: CmuxPromptLauncherDefinition,
         targetID: String,
         providerID: String,
-        repositoryID: String? = nil,
+        projectID: String? = nil,
         prompt: String
     ) -> String? {
         guard let target = config.targets.first(where: { $0.id == targetID }),
               let provider = config.providers.first(where: { $0.id == providerID }) else {
             return nil
         }
-        let repository: CmuxPromptLauncherChoice?
+        // `config.repositories` holds the sidebar projects once the caller
+        // applied ``CmuxPromptLauncherDefinition/applyingProjects(_:)``.
+        let project: CmuxPromptLauncherChoice?
         if config.repositories.isEmpty {
-            repository = nil
+            project = nil
         } else {
-            guard let repositoryID,
-                  let configuredRepository = config.repositories.first(where: { $0.id == repositoryID }) else {
+            guard let projectID,
+                  let configuredProject = config.repositories.first(where: { $0.id == projectID }) else {
                 return nil
             }
-            repository = configuredRepository
+            project = configuredProject
         }
         var values = [
             "prompt": shellQuote(prompt),
@@ -50,11 +53,15 @@ enum SidebarPromptLauncherTemplateRenderer {
             "provider.args": shellArguments(provider.args),
             "provider.arguments": shellArguments(provider.args),
         ]
-        if let repository {
-            values["repository.id"] = shellQuote(repository.id)
-            values["repository.title"] = shellQuote(repository.title)
-            values["repository.args"] = shellArguments(repository.args)
-            values["repository.arguments"] = shellArguments(repository.args)
+        if let project {
+            // `repository.*` stays an alias so a cmux.json shared with older
+            // builds can keep its repository-based template.
+            for prefix in ["project", "repository"] {
+                values["\(prefix).id"] = shellQuote(project.id)
+                values["\(prefix).title"] = shellQuote(project.title)
+                values["\(prefix).args"] = shellArguments(project.args)
+                values["\(prefix).arguments"] = shellArguments(project.args)
+            }
         }
         return renderTemplate(
             config.command,
@@ -93,6 +100,8 @@ enum SidebarPromptLauncherTemplateRenderer {
         var values: [String: String] = [
             "workspace.id": shellQuote(workspace.id.uuidString),
             "workspace.title": shellQuote(workspace.title),
+            // Always defined so hooks never abort for workspaces without a project.
+            "workspace.project": shellQuote(workspace.projectId ?? ""),
         ]
         if let description = workspace.customDescription {
             values["workspace.description"] = shellQuote(description)
@@ -125,6 +134,7 @@ enum SidebarPromptLauncherTemplateRenderer {
             description: firstString(in: object, keys: ["description"]),
             color: firstString(in: object, keys: ["color", "workspaceColor", "workspace_color"]),
             slot: firstString(in: object, keys: ["slot", "workspaceSlot", "workspace_slot"]),
+            project: firstString(in: object, keys: ["project", "projectId", "project_id"]),
             phase: firstString(in: object, keys: ["phase"]).flatMap(
                 SidebarPromptLauncherWorkspaceMetadata.Phase.init(rawValue:)
             ),

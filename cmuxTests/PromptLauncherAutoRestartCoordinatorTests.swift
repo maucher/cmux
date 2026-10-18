@@ -231,17 +231,17 @@ final class PromptLauncherAutoRestartCoordinatorTests: XCTestCase {
 
     func testPromptLauncherDecodesAutoRestartHook() throws {
         let json = """
-        {"command": "ws {{prompt}}",
+        {"command": "workspace-launch {{prompt}}",
          "targets": [{"id": "devbox", "args": ["devbox"]}],
          "providers": [{"id": "claude", "args": []}],
-         "restartHook": "ws restart --from-card --workspace {{workspace.id}}",
-         "autoRestartHook": "  ws restart --from-card --auto --workspace {{workspace.id}}  ",
+         "restartHook": "workspace-restart --from-card --workspace {{workspace.id}}",
+         "autoRestartHook": "  workspace-restart --from-card --auto --workspace {{workspace.id}}  ",
          "autoRestartGraceSeconds": 12}
         """
         let launcher = try JSONDecoder().decode(CmuxPromptLauncherDefinition.self, from: Data(json.utf8))
-        XCTAssertEqual(launcher.autoRestartHook, "ws restart --from-card --auto --workspace {{workspace.id}}")
+        XCTAssertEqual(launcher.autoRestartHook, "workspace-restart --from-card --auto --workspace {{workspace.id}}")
         XCTAssertEqual(launcher.autoRestartGraceSeconds, 12)
-        let defaults = try JSONDecoder().decode(CmuxPromptLauncherDefinition.self, from: Data(#"{"command": "ws", "targets": [{"id": "devbox", "args": []}], "providers": [{"id": "claude", "args": []}]}"#.utf8))
+        let defaults = try JSONDecoder().decode(CmuxPromptLauncherDefinition.self, from: Data(#"{"command": "workspace-launch", "targets": [{"id": "devbox", "args": []}], "providers": [{"id": "claude", "args": []}]}"#.utf8))
         XCTAssertNil(defaults.autoRestartHook)
         XCTAssertEqual(defaults.autoRestartGraceSeconds, CmuxPromptLauncherDefinition.defaultAutoRestartGraceSeconds)
         let roundTrip = try JSONDecoder().decode(

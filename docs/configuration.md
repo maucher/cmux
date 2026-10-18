@@ -37,22 +37,36 @@ button that opens the file at the offending line. The notice appears once per di
 of errors: reloads that keep the same errors stay quiet, fixing them hides the notice, and
 reintroducing an error shows it again. `cmux config doctor` validates `cmux.json` only.
 
-## `sidebar.sessionStatusGroups`
+## Projects (`~/.config/cmux/projects.json`)
 
-Defines the ordered status sections in the workspace sidebar. Pinned sessions always appear first, and statuses not assigned below appear in an **Other** section. Omitting this setting keeps the built-in Needs Attention, Running, and Finished sections.
+The workspace sidebar groups session cards by project: **Pinned** first, then the configured projects in file order, then **Other**. A group header appears only while the group has at least one open session, and cards keep their status badges. Workspaces pinned with cmux's pin action always appear in Pinned; workspaces without a project, or with a project id that is not configured, appear in Other.
+
+The prompt launcher picks a project instead of a repository. The selected project's `args`, `allowedTargets`, and `defaultTarget` replace the old repository choice.
 
 ```json
 {
-  "sidebar": {
-    "sessionStatusGroups": [
-      { "id": "running", "title": "Running", "statuses": ["working", "babysitting"] },
-      { "id": "finished", "title": "Finished", "statuses": ["ready", "done", "exited"] }
-    ]
-  }
+  "projects": [
+    { "id": "backend", "title": "Backend", "args": ["--repo", "backend"], "allowedTargets": ["devbox"], "defaultTarget": "devbox" },
+    { "id": "pinned", "title": "Pinned", "allowedTargets": ["local"], "defaultTarget": "local" }
+  ]
 }
 ```
 
-Group IDs must be unique and may contain letters, numbers, dots, underscores, and hyphens. The `pinned` and `other` IDs are reserved. Each supported status (`ready`, `needsInput`, `working`, `babysitting`, `done`, and `exited`) can belong to at most one configured group.
+- Each project takes the same fields as a `promptLauncher.repositories` entry (`id`, `title`, `args`, `allowedTargets`, `defaultTarget`).
+- Ids must be unique and may contain letters, numbers, dots, underscores, and hyphens. `other` is reserved.
+- `pinned` is a normal project for local sessions. When the file does not declare it, cmux adds it with the title "Pinned" (allowed/default target `local` when such a target exists).
+- Target ids must exist in `promptLauncher.targets`.
+- When `projects.json` does not exist, cmux uses `promptLauncher.repositories` as the projects. An invalid file is reported as a config issue and falls back the same way.
+
+cmux owns this file. Manage it with the CLI, which validates the whole document, writes it atomically, and regroups every window:
+
+```sh
+cmux projects get                    # print the effective document
+cmux projects set projects.json      # replace the document (or `-` for stdin)
+cmux projects assign workspace:3 backend   # move a workspace (or `none` to clear)
+```
+
+Launched workspaces remember their project (and launcher slot) across relaunches. The launcher command template can use `{{project.id}}`, `{{project.title}}`, `{{project.args}}`, and `{{project.arguments}}`; `{{repository.*}}` remains an alias for the selected project. Close and restart hooks can use `{{workspace.project}}` (empty when the workspace has no project). The launch process receives `CMUX_PROMPT_LAUNCHER_PROJECT=<project id>`, and a metadata line can set the workspace's project with a `"project"` key.
 
 ## `mobile.artifactFolderAccess`
 

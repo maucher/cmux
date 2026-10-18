@@ -13,13 +13,13 @@ struct SidebarSessionRowSnapshot: Equatable, Identifiable {
         self.groupID = groupID
     }
 
-    init(workspace: Workspace, status: SessionCardSnapshot.Status, groups: [SessionCardGroup] = []) {
+    init(workspace: Workspace, status: SessionCardSnapshot.Status, projects: [CmuxProjectDefinition] = []) {
         id = workspace.id
         self.status = status
         groupID = SessionCardGroup.resolveID(
-            status: status,
+            projectId: workspace.projectId,
             isPinned: workspace.isPinned,
-            configured: groups
+            projects: projects
         )
     }
 }

@@ -52,7 +52,7 @@ struct WorkspacePromptSubmitTests {
         #expect(environment == ["PATH": "/usr/bin", "CUSTOM_SETTING": "configured"])
     }
 
-    @Test func repositorySelectionPreservesManualEnvironmentAndAgent() {
+    @Test func projectSelectionPreservesManualEnvironmentAndAgent() {
         let model = PromptLauncherModel(commandRunner: PromptLauncherCommandRunnerSpy())
         let config = promptLauncherSelectionConfig()
         model.configure(config)
@@ -60,23 +60,23 @@ struct WorkspacePromptSubmitTests {
         model.selectedProvider = "codex"
         model.promptText = "Keep my draft"
 
-        for repository in ["backend", "tools", "backend"] {
-            model.selectRepository(repository)
+        for project in ["backend", "tools", "backend"] {
+            model.selectProject(project)
             model.configure(config)
-            #expect(model.selectedRepository == repository)
+            #expect(model.selectedProject == project)
             #expect(model.selectedTarget == "local")
             #expect(model.selectedProvider == "codex")
             #expect(model.promptText == "Keep my draft")
         }
     }
 
-    @Test func launchUsesManualEnvironmentAgentAndRepository() {
+    @Test func launchUsesManualEnvironmentAgentAndProject() {
         let model = PromptLauncherModel(commandRunner: PromptLauncherCommandRunnerSpy())
         let config = promptLauncherSelectionConfig()
         model.configure(config)
         model.selectedTarget = "local"
         model.selectedProvider = "codex"
-        model.selectRepository("tools")
+        model.selectProject("tools")
         model.promptText = "Use my selections"
 
         model.launch(
@@ -89,7 +89,7 @@ struct WorkspacePromptSubmitTests {
         #expect(model.jobs.count == 1)
         #expect(model.jobs.first?.targetID == "local")
         #expect(model.jobs.first?.providerID == "codex")
-        #expect(model.jobs.first?.repositoryID == "tools")
+        #expect(model.jobs.first?.projectID == "tools")
     }
 
     @Test func unsupportedEnvironmentIsPreservedWithoutLaunching() {
@@ -97,7 +97,7 @@ struct WorkspacePromptSubmitTests {
         let config = promptLauncherSelectionConfig()
         model.configure(config)
         model.selectedProvider = "codex"
-        model.selectRepository("tools")
+        model.selectProject("tools")
         model.promptText = "Keep my draft"
         model.launch(
             config: config,
@@ -108,14 +108,14 @@ struct WorkspacePromptSubmitTests {
 
         #expect(model.selectedTarget == "auto")
         #expect(model.selectedProvider == "codex")
-        #expect(model.selectedRepository == "tools")
+        #expect(model.selectedProject == "tools")
         #expect(model.promptText == "Keep my draft")
         #expect(model.jobs.isEmpty)
         #expect(!model.isTargetSupported(config))
 
         model.selectedTarget = "local"
         #expect(model.isTargetSupported(config))
-        #expect(model.selectedRepository == "tools")
+        #expect(model.selectedProject == "tools")
         #expect(model.selectedProvider == "codex")
     }
 
@@ -125,13 +125,13 @@ struct WorkspacePromptSubmitTests {
         model.configure(config)
         model.selectedTarget = "local"
         model.selectedProvider = "codex"
-        model.selectRepository("tools")
+        model.selectProject("tools")
         model.promptText = "Keep my draft"
 
         model.resetDestination(config)
 
         #expect(model.selectedTarget == "auto")
-        #expect(model.selectedRepository == "backend")
+        #expect(model.selectedProject == "backend")
         #expect(model.selectedProvider == "codex")
         #expect(model.promptText == "Keep my draft")
     }
@@ -140,16 +140,16 @@ struct WorkspacePromptSubmitTests {
         let model = PromptLauncherModel(commandRunner: PromptLauncherCommandRunnerSpy())
         var config = promptLauncherSelectionConfig()
         model.configure(config)
-        #expect(model.selectedRepository == "backend")
+        #expect(model.selectedProject == "backend")
         #expect(model.selectedTarget == "auto")
         #expect(model.selectedProvider == "claude")
         model.selectedTarget = "local"
         model.selectedProvider = "codex"
-        model.selectRepository("tools")
+        model.selectProject("tools")
 
         config.repositories.removeAll { $0.id == "tools" }
         model.configure(config)
-        #expect(model.selectedRepository == "backend")
+        #expect(model.selectedProject == "backend")
         #expect(model.selectedTarget == "local")
         #expect(model.selectedProvider == "codex")
     }
@@ -438,7 +438,7 @@ struct WorkspacePromptSubmitTests {
                 config: config,
                 targetID: "devbox",
                 providerID: "claude",
-                repositoryID: "docs",
+                projectID: "docs",
                 prompt: "Update the guide"
             ) == "workspace-launch --repo 'projects/docs' 'devbox' 'Update the guide'"
         )
@@ -460,6 +460,149 @@ struct WorkspacePromptSubmitTests {
                 prompt: "Existing config"
             ) == "workspace-launch  'Existing config'"
         )
+    }
+
+    @Test func promptLauncherRendersProjectKeysAndRepositoryAliases() {
+        let launcher = CmuxPromptLauncherDefinition(
+            command: "workspace-launch --repo {{repository.args}} --project {{project.id}} {{project.title}} {{project.arguments}} {{repository.id}} {{prompt}}",
+            targets: [CmuxPromptLauncherChoice(id: "local"), CmuxPromptLauncherChoice(id: "devbox")],
+            providers: [CmuxPromptLauncherChoice(id: "claude")],
+            repositories: [CmuxPromptLauncherChoice(id: "legacy", args: ["legacy"])],
+            defaultRepository: "legacy"
+        )
+        let config = launcher.applyingProjects([
+            CmuxProjectDefinition(id: "backend", title: "Back End", args: ["backend"], allowedTargets: ["devbox", "gone"], defaultTarget: "devbox"),
+            CmuxProjectDefinition(id: "pinned", title: "Pinned", allowedTargets: ["local"], defaultTarget: "local"),
+        ])
+
+        #expect(config.repositories.map(\.id) == ["backend", "pinned"])
+        #expect(config.selectedDefaultProjectID == "backend")
+        #expect(config.targets(forProjectID: "backend").map(\.id) == ["devbox"])
+        #expect(config.selectedDefaultTargetID(forProjectID: "pinned") == "local")
+        #expect(
+            SidebarPromptLauncherTemplateRenderer.renderCommand(
+                config: config,
+                targetID: "devbox",
+                providerID: "claude",
+                projectID: "backend",
+                prompt: "Go"
+            ) == "workspace-launch --repo 'backend' --project 'backend' 'Back End' 'backend' 'backend' 'Go'"
+        )
+        #expect(launcher.applyingProjects([]) == launcher)
+    }
+
+    @Test func promptLauncherLaunchEnvironmentCarriesSelectedProject() {
+        let config = CmuxPromptLauncherDefinition(
+            command: "workspace-launch {{prompt}}",
+            targets: [CmuxPromptLauncherChoice(id: "local")],
+            providers: [CmuxPromptLauncherChoice(id: "claude")],
+            environment: ["KEEP": "1"]
+        )
+        #expect(
+            PromptLauncherModel.launchEnvironment(config: config, projectID: "backend")
+                == ["KEEP": "1", "CMUX_PROMPT_LAUNCHER_PROJECT": "backend"]
+        )
+        #expect(PromptLauncherModel.launchEnvironment(config: config, projectID: nil) == ["KEEP": "1"])
+        #expect(PromptLauncherModel.launchEnvironment(config: config, projectID: " ") == ["KEEP": "1"])
+    }
+
+    @Test func promptLauncherLaunchPassesProjectAndAssignsWorkspaceProject() async throws {
+        let runner = PromptLauncherCommandRunnerSpy()
+        var requests = runner.requests.makeAsyncIterator()
+        let model = PromptLauncherModel(commandRunner: runner)
+        let manager = TabManager()
+        let workspace = manager.tabs[0]
+        let workspaceRef = try #require(
+            TerminalController.shared.v2Ref(kind: .workspace, uuid: workspace.id) as? String
+        )
+        let config = CmuxPromptLauncherDefinition(
+            command: "workspace-launch --repo {{repository.args}} {{prompt}}",
+            targets: [CmuxPromptLauncherChoice(id: "auto")],
+            providers: [CmuxPromptLauncherChoice(id: "claude")],
+            defaultTarget: "auto",
+            defaultProvider: "claude",
+            metadataPrefix: "CMUX_WORKSPACE_JSON:"
+        ).applyingProjects([
+            CmuxProjectDefinition(id: "backend", args: ["backend"]),
+            CmuxProjectDefinition(id: "docs", args: ["docs"]),
+        ])
+        model.configure(config)
+        model.selectProject("docs")
+        model.promptText = "Project launch"
+        model.launch(
+            config: config,
+            tabManager: manager,
+            configSourcePath: "/tmp/cmux.json",
+            globalConfigPath: "/tmp/cmux.json"
+        )
+        let request = try #require(await requests.next())
+        #expect(request.shellCommand.contains("--repo 'docs'"))
+        #expect(request.environment["CMUX_PROMPT_LAUNCHER_PROJECT"] == "docs")
+
+        await runner.emit(
+            .output("CMUX_WORKSPACE_JSON:{\"workspace\":\"\(workspaceRef)\",\"title\":\"[wk5] Docs\"}"),
+            for: request.id
+        )
+        await waitUntil { workspace.projectId == "docs" }
+        #expect(workspace.projectId == "docs")
+
+        await runner.emit(
+            .output("CMUX_WORKSPACE_JSON:{\"workspace\":\"\(workspaceRef)\",\"project\":\"backend\"}"),
+            for: request.id
+        )
+        await waitUntil { workspace.projectId == "backend" }
+        #expect(workspace.projectId == "backend")
+    }
+
+    @Test func promptLauncherParsesProjectMetadataKey() throws {
+        let metadata = try #require(SidebarPromptLauncherTemplateRenderer.metadata(
+            from: ##"CMUX_WORKSPACE_JSON:{"workspace":"workspace:3","project":"backend"}"##,
+            prefix: "CMUX_WORKSPACE_JSON:"
+        ))
+        #expect(metadata.project == "backend")
+        let withoutProject = try #require(SidebarPromptLauncherTemplateRenderer.metadata(
+            from: ##"CMUX_WORKSPACE_JSON:{"workspace":"workspace:3"}"##,
+            prefix: "CMUX_WORKSPACE_JSON:"
+        ))
+        #expect(withoutProject.project == nil)
+    }
+
+    @Test func promptLauncherHooksRenderWorkspaceProject() {
+        let config = CmuxPromptLauncherDefinition(
+            command: "workspace-launch {{prompt}}",
+            targets: [CmuxPromptLauncherChoice(id: "auto")],
+            providers: [CmuxPromptLauncherChoice(id: "claude")],
+            closeHook: "workspace-close --project {{workspace.project}}"
+        )
+        let workspace = Workspace()
+        #expect(
+            SidebarPromptLauncherTemplateRenderer.renderCloseHook(config: config, workspace: workspace)
+                == "workspace-close --project ''"
+        )
+        workspace.projectId = "backend"
+        #expect(
+            SidebarPromptLauncherTemplateRenderer.renderCloseHook(config: config, workspace: workspace)
+                == "workspace-close --project 'backend'"
+        )
+    }
+
+    @Test func workspaceSnapshotRoundTripsProjectAndLauncherSlot() throws {
+        let workspace = Workspace()
+        workspace.projectId = "backend"
+        workspace.promptLauncherSlot = "wk3"
+        let snapshot = workspace.sessionSnapshot(includeScrollback: false)
+        #expect(snapshot.projectId == "backend")
+        #expect(snapshot.promptLauncherSlot == "wk3")
+
+        let data = try JSONEncoder().encode(snapshot)
+        let decoded = try JSONDecoder().decode(SessionWorkspaceSnapshot.self, from: data)
+        #expect(decoded.projectId == "backend")
+        #expect(decoded.promptLauncherSlot == "wk3")
+
+        let restored = Workspace()
+        restored.restoreSessionSnapshot(decoded)
+        #expect(restored.projectId == "backend")
+        #expect(restored.promptLauncherSlot == "wk3")
     }
 
     @Test func promptLauncherParsesWorkspaceMetadataLine() throws {
@@ -1122,6 +1265,7 @@ private actor PromptLauncherCommandRunnerSpy: PromptLauncherCommandRunning {
     struct Request: Sendable {
         let id: UUID
         let shellCommand: String
+        var environment: [String: String] = [:]
     }
 
     nonisolated let requests: AsyncStream<Request>
@@ -1134,13 +1278,13 @@ private actor PromptLauncherCommandRunnerSpy: PromptLauncherCommandRunning {
 
     func events(
         shellCommand: String,
-        environment _: [String: String],
+        environment: [String: String],
         forwardedSocketPath _: String?
     ) -> AsyncStream<PromptLauncherCommandEvent> {
         let id = UUID()
         let (events, continuation) = AsyncStream<PromptLauncherCommandEvent>.makeStream()
         eventContinuations[id] = continuation
-        requestContinuation.yield(Request(id: id, shellCommand: shellCommand))
+        requestContinuation.yield(Request(id: id, shellCommand: shellCommand, environment: environment))
         return events
     }
 

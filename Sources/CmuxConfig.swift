@@ -79,10 +79,9 @@ struct CmuxConfigFile: Codable, Sendable {
     /// Brokers a user declares for remote-tmux transports, named so the control socket can only
     /// pick something already written down here. See ``CmuxRemoteTmuxConfigDefinition``.
     var remoteTmux: CmuxRemoteTmuxConfigDefinition?
-    var sidebar: CmuxConfigSidebarDefinition?
 
     private enum CodingKeys: String, CodingKey {
-        case packs, actions, settingPresets, ui, notifications, agentChat, promptLauncher, newWorkspaceCommand, surfaceTabBarButtons, commands, vault, workspaceGroups, remoteTmux, sidebar
+        case packs, actions, settingPresets, ui, notifications, agentChat, promptLauncher, newWorkspaceCommand, surfaceTabBarButtons, commands, vault, workspaceGroups, remoteTmux
     }
 
     init(
@@ -98,8 +97,7 @@ struct CmuxConfigFile: Codable, Sendable {
         commands: [CmuxCommandDefinition] = [],
         vault: CmuxVaultConfigDefinition? = nil,
         workspaceGroups: CmuxConfigWorkspaceGroupsDefinition? = nil,
-        remoteTmux: CmuxRemoteTmuxConfigDefinition? = nil,
-        sidebar: CmuxConfigSidebarDefinition? = nil
+        remoteTmux: CmuxRemoteTmuxConfigDefinition? = nil
     ) {
         self.packs = packs
         self.actions = actions
@@ -114,7 +112,6 @@ struct CmuxConfigFile: Codable, Sendable {
         self.vault = vault
         self.workspaceGroups = workspaceGroups
         self.remoteTmux = remoteTmux
-        self.sidebar = sidebar
     }
 
     init(from decoder: Decoder) throws {
@@ -177,38 +174,6 @@ struct CmuxConfigFile: Codable, Sendable {
             CmuxRemoteTmuxConfigDefinition.self,
             forKey: .remoteTmux
         )
-        sidebar = try container.decodeIfPresent(CmuxConfigSidebarDefinition.self, forKey: .sidebar)
-        try Self.validateSessionStatusGroups(
-            sidebar?.sessionStatusGroups,
-            codingPath: decoder.codingPath + [CodingKeys.sidebar]
-        )
-    }
-
-    private static func validateSessionStatusGroups(
-        _ groups: [CmuxSessionStatusGroupDefinition]?,
-        codingPath: [CodingKey]
-    ) throws {
-        guard let groups else { return }
-        var ids = Set<String>()
-        var statuses = Set<SessionCardSnapshot.Status>()
-        for group in groups {
-            guard ids.insert(group.id).inserted else {
-                throw DecodingError.dataCorrupted(
-                    DecodingError.Context(
-                        codingPath: codingPath,
-                        debugDescription: "sidebar.sessionStatusGroups must not contain duplicate ids"
-                    )
-                )
-            }
-            for status in group.statuses where !statuses.insert(status).inserted {
-                throw DecodingError.dataCorrupted(
-                    DecodingError.Context(
-                        codingPath: codingPath,
-                        debugDescription: "sidebar.sessionStatusGroups must assign each status at most once"
-                    )
-                )
-            }
-        }
     }
 
     private static func normalizedActions(
@@ -750,6 +715,44 @@ struct CmuxPromptLauncherDefinition: Codable, Sendable, Hashable {
             return defaultTarget
         }
         return availableTargets.first?.id ?? ""
+    }
+
+    /// An effective launcher whose repository choices are the given projects.
+    /// The `{{repository.*}}` template keys, ENV filtering and reset then follow
+    /// the selected project. Target references unknown to this launcher are
+    /// dropped instead of disabling the whole launcher.
+    func applyingProjects(_ projects: [CmuxProjectDefinition]) -> CmuxPromptLauncherDefinition {
+        guard !projects.isEmpty else { return self }
+        let targetIDs = Set(targets.map(\.id))
+        var effective = self
+        effective.repositories = projects.map { project in
+            var choice = project
+            if let allowed = choice.allowedTargets {
+                let known = allowed.filter(targetIDs.contains)
+                choice.allowedTargets = known.isEmpty ? nil : known
+            }
+            if let projectDefault = choice.defaultTarget,
+               !(choice.allowedTargets ?? Array(targetIDs)).contains(projectDefault) {
+                choice.defaultTarget = nil
+            }
+            return choice
+        }
+        if let defaultRepository, !projects.contains(where: { $0.id == defaultRepository }) {
+            effective.defaultRepository = nil
+        }
+        return effective
+    }
+
+    var selectedDefaultProjectID: String {
+        selectedDefaultRepositoryID
+    }
+
+    func targets(forProjectID projectID: String) -> [CmuxPromptLauncherChoice] {
+        targets(forRepositoryID: projectID)
+    }
+
+    func selectedDefaultTargetID(forProjectID projectID: String) -> String {
+        selectedDefaultTargetID(forRepositoryID: projectID)
     }
 
     var trustCommandDescription: String {
@@ -2295,7 +2298,11 @@ final class CmuxConfigStore: ObservableObject {
     /// anchor workspace's cwd. Empty when no `workspaceGroups.byCwd` block is
     /// configured.
     @Published private(set) var workspaceGroupConfigs: [CmuxResolvedWorkspaceGroupConfig] = []
-    @Published private(set) var sessionStatusGroups: [SessionCardGroup] = []
+    /// Sidebar projects in group order (implicit `pinned` appended when absent).
+    /// Loaded from `projects.json`, or from `promptLauncher.repositories` when
+    /// that file does not exist.
+    @Published private(set) var projects: [CmuxProjectDefinition] = []
+    @Published private(set) var projectsSource: ProjectsSource = .repositories
     @Published private(set) var surfaceTabBarButtons: [CmuxSurfaceTabBarButton] = CmuxSurfaceTabBarButton.defaults
     /// Original action-registry reference keyed by resolved surface-tab button id.
     /// Inline buttons have no entry; this survives resolution so discovery UI
@@ -2317,7 +2324,13 @@ final class CmuxConfigStore: ObservableObject {
     private(set) var localConfigPath: String?
     private weak var tabManager: TabManager?
     let globalConfigPath: String
+    let projectsStore: ProjectsConfigStore
     private let fileWatchingEnabled: Bool
+
+    enum ProjectsSource: String, Sendable {
+        case file
+        case repositories
+    }
 
     nonisolated static func defaultGlobalConfigPath() -> String {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
@@ -2425,9 +2438,14 @@ final class CmuxConfigStore: ObservableObject {
     init(
         globalConfigPath: String = CmuxConfigStore.defaultGlobalConfigPath(),
         localConfigPath: String? = nil,
+        projectsConfigPath: String? = nil,
         startFileWatchers: Bool = false
     ) {
         self.globalConfigPath = globalConfigPath
+        self.projectsStore = ProjectsConfigStore(
+            explicitPath: projectsConfigPath,
+            globalConfigPath: globalConfigPath
+        )
         self.localConfigPath = localConfigPath
         self.fileWatchingEnabled = startFileWatchers
         self.localConfigSearchDirectory = localConfigPath.map(Self.searchDirectoryForLocalConfigPath(_:))
@@ -2584,7 +2602,6 @@ final class CmuxConfigStore: ObservableObject {
         var configuredPromptLauncherSourcePath: String?
         var configuredSurfaceTabBarButtons: [CmuxSurfaceTabBarButton]?
         var configuredSurfaceTabBarButtonSourcePath: String?
-        var configuredSessionStatusGroups: [CmuxSessionStatusGroupDefinition]?
         let localPath = localConfigPath
         let localParseResult = localPath.map { parseConfig(at: $0) }
         let globalParseResult = parseConfig(at: globalConfigPath)
@@ -2679,9 +2696,6 @@ final class CmuxConfigStore: ObservableObject {
                 configuredSurfaceTabBarButtons = surfaceTabBarButtons(buttons, from: entry)
                 configuredSurfaceTabBarButtonSourcePath = entry.sourcePath
             }
-            if configuredSessionStatusGroups == nil {
-                configuredSessionStatusGroups = localConfig.sidebar?.sessionStatusGroups
-            }
             for command in localConfig.commands {
                 if !seenNames.contains(command.name) {
                     commands.append(command)
@@ -2720,9 +2734,6 @@ final class CmuxConfigStore: ObservableObject {
                let buttons = globalConfig.surfaceTabBarButtons {
                 configuredSurfaceTabBarButtons = surfaceTabBarButtons(buttons, from: entry)
                 configuredSurfaceTabBarButtonSourcePath = entry.sourcePath
-            }
-            if configuredSessionStatusGroups == nil {
-                configuredSessionStatusGroups = globalConfig.sidebar?.sessionStatusGroups
             }
             for command in globalConfig.commands {
                 if !seenNames.contains(command.name) {
@@ -2841,9 +2852,9 @@ final class CmuxConfigStore: ObservableObject {
             issues: &issues
         )
         workspaceGroupConfigs = resolvedGroupConfigs
-        sessionStatusGroups = configuredSessionStatusGroups?.map {
-            SessionCardGroup(id: $0.id, title: $0.title, statuses: Set($0.statuses))
-        } ?? []
+        let resolvedProjects = resolveProjects(promptLauncher: configuredPromptLauncher, issues: &issues)
+        if projects != resolvedProjects.projects { projects = resolvedProjects.projects }
+        if projectsSource != resolvedProjects.source { projectsSource = resolvedProjects.source }
         surfaceTabBarButtonSourcePath = configuredSurfaceTabBarButtonSourcePath
         surfaceTabBarCommandSourcePaths = resolvedButtons.terminalCommandSourcePaths
         let visibleSurfaceButtonIDs = Set(resolvedWorkspaceButtons.buttons.map(\.id))

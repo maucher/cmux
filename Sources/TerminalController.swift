@@ -3461,6 +3461,12 @@ class TerminalController {
             return v2Result(id: id, v2AutomationLogs(params: params))
         case "automation.reload":
             return v2Result(id: id, v2AutomationReload())
+        case "projects.get":
+            return v2Result(id: id, v2ProjectsGet(params: params))
+        case "projects.set":
+            return v2Result(id: id, v2ProjectsSet(params: params))
+        case "workspace.set_project":
+            return v2Result(id: id, v2WorkspaceSetProject(params: params))
         case "caffeine.status":
             return v2Result(id: id, v2CaffeineStatus())
         case "caffeine.set":

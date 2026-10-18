@@ -222,6 +222,7 @@ struct CmuxCommand: AsyncParsableCommand {
             SimulateAppActiveCommand.self,
             SimulateSidebarDragCommand.self,
             ProjectCommand.self,
+            ProjectsCommand.self,
             WindowNamespaceCommand.self,
             CanvasCommand.self,
             LayoutCommand.self,
