@@ -16731,7 +16731,8 @@ struct TabItemView: View, Equatable {
                     makesPullRequestsClickable: settings.makesPullRequestsClickable,
                     onRestart: actions.restartSession,
                     onClose: actions.closeWorkspace,
-                    onOpenPullRequest: openPullRequestLink
+                    onOpenPullRequest: openPullRequestLink,
+                    renameField: isEditing ? AnyView(inlineRenameField) : nil
                 )
             } else {
             HStack(alignment: .sidebarTitleFirstLineCenter, spacing: titleRowSpacing) {
@@ -16793,29 +16794,7 @@ struct TabItemView: View, Equatable {
                 SidebarCloudWorkspaceBadgeView(label: settings.showsCloudDeviceIcons && !settings.hidesAllDetails ? workspaceSnapshot.remoteWorkspaceBadgeLabel : nil, pointSize: scaledFontSize(10), tint: activeSecondaryColor(0.7), symbol: workspaceSnapshot.remoteWorkspaceBadgeSymbol)
 
                 if isEditing {
-                    SidebarInlineRenameField(
-                        initialText: renameDraft,
-                        fontSize: GlobalFontMagnification.scaledSize(scaledFontSize(12.5), percent: globalFontMagnificationPercent), textColor: selectedWorkspaceForegroundNSColor(opacity: 1.0),
-                        accessibilityLabel: String(
-                            localized: "sidebar.workspace.rename.field.accessibilityLabel",
-                            defaultValue: "Rename workspace"
-                        ),
-                        placeholder: String(
-                            localized: "commandPalette.rename.workspacePlaceholder",
-                            defaultValue: "Workspace name"
-                        ),
-                        onCommit: { newName in
-                            if let title = SidebarInlineRenameCommit().titleToCommit(
-                                draft: newName,
-                                baseline: renameDraft,
-                                baselineHadUserCustomTitle: renameBaselineHadUserCustomTitle
-                            ) {
-                                actions.setCustomTitle(title)
-                            }
-                            isEditing = false
-                        },
-                        onCancel: { isEditing = false }
-                    )
+                    inlineRenameField
                     .opacity(workspaceSnapshot.isMuted ? 0.6 : 1)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .alignmentGuide(.sidebarTitleFirstLineCenter) { _ in titleFirstLineCenter }
@@ -17171,6 +17150,32 @@ struct TabItemView: View, Equatable {
 #endif
         rowView
     }
+    private var inlineRenameField: some View {
+        SidebarInlineRenameField(
+            initialText: renameDraft,
+            fontSize: GlobalFontMagnification.scaledSize(scaledFontSize(12.5), percent: globalFontMagnificationPercent), textColor: selectedWorkspaceForegroundNSColor(opacity: 1.0),
+            accessibilityLabel: String(
+                localized: "sidebar.workspace.rename.field.accessibilityLabel",
+                defaultValue: "Rename workspace"
+            ),
+            placeholder: String(
+                localized: "commandPalette.rename.workspacePlaceholder",
+                defaultValue: "Workspace name"
+            ),
+            onCommit: { newName in
+                if let title = SidebarInlineRenameCommit().titleToCommit(
+                    draft: newName,
+                    baseline: renameDraft,
+                    baselineHadUserCustomTitle: renameBaselineHadUserCustomTitle
+                ) {
+                    actions.setCustomTitle(title)
+                }
+                isEditing = false
+            },
+            onCancel: { isEditing = false }
+        )
+    }
+
     /// Double-click selects the row (the gesture is also a click), then edits
     /// its title in place.
     private func beginInlineRename() {

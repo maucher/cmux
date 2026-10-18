@@ -11,6 +11,8 @@ struct SessionCard: View {
     let onRestart: () -> Void
     let onClose: () -> Void
     let onOpenPullRequest: (URL) -> Void
+    /// The inline rename field, shown in place of the name while editing.
+    var renameField: AnyView? = nil
 
     var body: some View {
         ZStack(alignment: .leading) {
@@ -60,12 +62,17 @@ struct SessionCard: View {
             .help(snapshot.host.displayName)
             .accessibilityLabel(Text(snapshot.host.displayName))
 
-            Text(snapshot.name)
-                .font(.custom("Inter", size: scaled(12.5)).weight(.semibold))
-                .foregroundColor(hexColor("#EAEAEF"))
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            if let renameField {
+                renameField
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                Text(snapshot.name)
+                    .font(.custom("Inter", size: scaled(12.5)).weight(.semibold))
+                    .foregroundColor(hexColor("#EAEAEF"))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
 
             Button(action: onRestart) {
                 Group {
