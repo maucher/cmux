@@ -211,6 +211,8 @@ private struct SidebarImmediateObservationState: Equatable {
     let taskStatusOverride: WorkspaceTaskStatusOverride?
     let statusHidden: Bool
     let checklist: [WorkspaceChecklistItem]
+    let isSessionRestartingFromCard: Bool
+    let projectId: String?
 }
 
 private struct SidebarObservationState: Equatable {
@@ -278,10 +280,12 @@ extension Workspace {
             todoState.$statusHidden,
             todoState.$checklist
         )
+        // Project membership regroups the card, so it must refresh immediately.
+        let restartFields = $isSessionRestartingFromCard.combineLatest($projectId)
 
         let immediateFields = workspaceFields
-            .combineLatest(conversationFields, todoFields)
-            .map { workspaceFields, conversationFields, todoFields in
+            .combineLatest(conversationFields, todoFields, restartFields)
+            .map { workspaceFields, conversationFields, todoFields, restartFields in
                 SidebarImmediateObservationState(
                     titleRevision: workspaceFields.0.0.0,
                     customDescription: workspaceFields.0.0.1,
@@ -294,7 +298,9 @@ extension Workspace {
                     panelPrompts: conversationFields.3,
                     taskStatusOverride: todoFields.0,
                     statusHidden: todoFields.1,
-                    checklist: todoFields.2
+                    checklist: todoFields.2,
+                    isSessionRestartingFromCard: restartFields.0,
+                    projectId: restartFields.1
                 )
             }
             .removeDuplicates()

@@ -2071,7 +2071,8 @@ CMUX_CLAUDE_QUEUED_HOOK_COMMAND
     cmux_claude_standard_hook_settings_value+='"SessionStart":['"$q_prefix$session_start$q_suffix"'"},'"$inbox_wait"'],'
     cmux_claude_standard_hook_settings_value+='"Stop":['"$q_prefix$stop$q_suffix"'"},'"$q_prefix$feed$q_suffix"'"},{"hooks":[{"async":true,"command":"'"$direct_cli"' hooks claude auto-name","timeout":120,"type":"command"}],"matcher":""},'"$inbox_wait"'],'
     cmux_claude_standard_hook_settings_value+='"StopFailure":['"$q_prefix$stop$q_suffix"'"},'"$inbox_wait"'],'
-    cmux_claude_standard_hook_settings_value+='"SubagentStop":['"$q_prefix$feed$q_suffix"'"}],'
+    cmux_claude_standard_hook_settings_value+='"SubagentStart":[{"hooks":[{"command":"'"$direct_cli"' hooks claude subagent-start","timeout":10,"type":"command"}],"matcher":""}],'
+    cmux_claude_standard_hook_settings_value+='"SubagentStop":[{"hooks":[{"command":"'"$direct_cli"' hooks claude subagent-stop","timeout":10,"type":"command"}],"matcher":""},'"$q_prefix$feed$q_suffix"'"}],'
     cmux_claude_standard_hook_settings_value+='"UserPromptSubmit":['"$q_prefix$prompt_submit$q_suffix"'"},{"hooks":[{"command":"'"$direct_cli"' hooks claude inbox-drain 2>/dev/null || echo '"'"'{}'"'"'","timeout":5,"type":"command"}],"matcher":""}]'
     cmux_claude_standard_hook_settings_value+='},"preferredNotifChannel":"notifications_disabled"}'
 }
@@ -2174,8 +2175,11 @@ catch (_) { process.exit(1); }
 #   bypassPermissions it covers permissions, ExitPlanMode, and AskUserQuestion
 #   without using PreToolUse denial as a side channel; under bypassPermissions it
 #   does not fire, and PreToolUse is the needs-input fallback (see above).
-# - SubagentStop: feed telemetry only. It must not run the visible Stop
-#   hook because a subagent finishing should not notify like the parent.
+# - SubagentStop: lifecycle re-evaluation plus feed telemetry. It must not run
+#   the visible Stop hook because a subagent finishing should not notify like
+#   the parent.
+# - SubagentStart: tracks in-flight Task-tool subagents so the pane stays
+#   Working until the last one stops.
 # - Stop auto-name: opt-in AI workspace/tab naming. ASYNC with a long
 #   timeout because it may run a summarization subprocess; it gates itself
 #   on the workspaceAutoNaming setting via a socket probe, so it is a

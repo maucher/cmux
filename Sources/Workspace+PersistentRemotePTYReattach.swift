@@ -13,6 +13,10 @@ extension Workspace {
 
     func markPersistentRemotePTYAttachFailed(surfaceId: UUID) {
         guard remoteConfiguration?.preserveAfterTerminalExit == true else { return }
+        let workspaceId = id
+        Task { @MainActor in
+            AppDelegate.shared?.promptLauncherAutoRestartCoordinator?.noteRemoteSurfaceDropped(workspaceId: workspaceId)
+        }
         let previousPresentedDirectory = presentedCurrentDirectory
         let sessionEnded = endedPersistentRemotePTYAttachSurfaceIds.contains(surfaceId)
         if !sessionEnded {

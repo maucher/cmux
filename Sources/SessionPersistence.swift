@@ -1847,6 +1847,10 @@ struct SessionWorkspaceSnapshot: Codable, Sendable {
     /// backwards-compatible; missing values restore as `false`.
     var isMuted: Bool? = nil
     var groupId: UUID? = nil
+    /// Sidebar project id; absent in manifests written before project groups.
+    var projectId: String? = nil
+    /// Prompt-launcher slot; absent in manifests written before it was persisted.
+    var promptLauncherSlot: String? = nil
     var isManuallyUnread: Bool? = nil
     var hasUnreadIndicator: Bool? = nil
     var notifications: [SessionNotificationSnapshot]? = nil

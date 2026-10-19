@@ -673,6 +673,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             self.sidebarSelectionState = sidebarSelectionState
             self.fileExplorerState = fileExplorerState
             self.cmuxConfigStore = cmuxConfigStore
+            // The prompt launcher's close/restart hooks read config through
+            // the window's TabManager.
+            if let cmuxConfigStore {
+                tabManager.cmuxConfigStore = cmuxConfigStore
+            }
             self.window = window
             self.workspaceTerminalFontSizeArbiter =
                 workspaceTerminalFontSizeArbiter
@@ -877,6 +882,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     }
     private var workspaceObserver: NSObjectProtocol?
     private var lifecycleSnapshotObservers: [NSObjectProtocol] = []
+    /// Restores prompt-launcher remote workspaces after wake or a network change.
+    var promptLauncherAutoRestartCoordinator: PromptLauncherAutoRestartCoordinator?
+    var remoteSessionNetworkPathMonitor: RemoteSessionNetworkPathMonitor?
     private var windowKeyObservers: [NSObjectProtocol] = []
     private var shortcutMonitor: Any?
     private var shortcutDefaultsObserver: NSObjectProtocol?
@@ -4664,13 +4672,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
         let remotePowerObservers = RemoteSessionPowerObserver().install(
             in: workspaceCenter,
-            onWillSleep: { [weak self] in self?.prepareRemoteSessionsForSystemSleep() },
+            onWillSleep: { [weak self] in
+                self?.prepareRemoteSessionsForSystemSleep()
+                self?.promptLauncherAutoRestartCoordinator?.noteSystemWillSleep()
+            },
             onDidWake: { [weak self] in
                 self?.restartSocketListenerIfEnabled(source: "workspace.didWake")
                 self?.rearmRemoteSessionsAfterSystemWake()
+                self?.promptLauncherAutoRestartCoordinator?.noteSystemWake()
             }
         )
         lifecycleSnapshotObservers.append(contentsOf: remotePowerObservers)
+        installPromptLauncherAutoRestart()
 
         registerDisplayReconfigurationCallbackIfNeeded()
         let displayReconfigurationObserver = NotificationCenter.default.addObserver(
@@ -5568,6 +5581,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             )
             if let cmuxConfigStore {
                 existing.cmuxConfigStore = cmuxConfigStore
+                tabManager.cmuxConfigStore = cmuxConfigStore
             }
             existing.closeObserver = WindowCloseObserver(window: window) { [weak self] in self?.unregisterMainWindow($0) }
         } else if let existing = mainWindowContexts.values.first(where: { $0.windowId == windowId }) {
@@ -5606,6 +5620,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             )
             if let cmuxConfigStore {
                 existing.cmuxConfigStore = cmuxConfigStore
+                tabManager.cmuxConfigStore = cmuxConfigStore
             }
             reindexMainWindowContextIfNeeded(existing, for: window)
             existing.closeObserver = WindowCloseObserver(window: window) { [weak self] in self?.unregisterMainWindow($0) }

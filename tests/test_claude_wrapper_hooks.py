@@ -167,7 +167,11 @@ def generated_claude_hook_settings() -> str:
             inbox_wait,
         ],
         "StopFailure": [queued("stop"), inbox_wait],
-        "SubagentStop": [queued("feed")],
+        "SubagentStart": [direct(f"{direct_cli} hooks claude subagent-start", 10)],
+        "SubagentStop": [
+            direct(f"{direct_cli} hooks claude subagent-stop", 10),
+            queued("feed"),
+        ],
         "SessionEnd": [queued("session-end")],
         "Notification": [queued("notification")],
         "UserPromptSubmit": [
@@ -854,7 +858,7 @@ def test_live_socket_injects_supported_hooks_without_unlocking_bypass(failures: 
         failures,
     )
     hooks = settings.get("hooks", {})
-    expected_hooks = {"SessionStart", "Stop", "StopFailure", "SubagentStop", "SessionEnd", "Notification", "UserPromptSubmit", "PreToolUse", "PostToolUse", "PermissionRequest"}
+    expected_hooks = {"SessionStart", "Stop", "StopFailure", "SubagentStart", "SubagentStop", "SessionEnd", "Notification", "UserPromptSubmit", "PreToolUse", "PostToolUse", "PermissionRequest"}
     expect(set(hooks.keys()) == expected_hooks, f"unexpected hook keys: {hooks.keys()}, expected {expected_hooks}", failures)
     for hook_name, expected_subcommand in {
         "SessionStart": "session-start",
@@ -930,7 +934,11 @@ def test_live_socket_injects_supported_hooks_without_unlocking_bypass(failures: 
         f"PermissionRequest hook should call hooks feed, got {permission_request_hooks}",
         failures,
     )
-    subagent_stop_hooks = hooks.get("SubagentStop", [{}])[0].get("hooks", [{}])
+    subagent_stop_hooks = [
+        hook
+        for group in hooks.get("SubagentStop", [])
+        for hook in group.get("hooks", [])
+    ]
     expect(
         any(
             "hooks enqueue claude feed" in h.get("command", "")
@@ -1283,7 +1291,7 @@ def test_live_socket_merges_user_settings_into_hooks(failures: list[str]) -> Non
         failures,
     )
     expected_hooks = {
-        "SessionStart", "Stop", "StopFailure", "SubagentStop", "SessionEnd",
+        "SessionStart", "Stop", "StopFailure", "SubagentStart", "SubagentStop", "SessionEnd",
         "Notification", "UserPromptSubmit", "PreToolUse", "PostToolUse", "PermissionRequest",
     }
     expect(

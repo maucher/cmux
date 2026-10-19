@@ -61,7 +61,21 @@ extension CMUXCLI {
             command: "\(hookCLI) hooks claude inbox-drain 2>/dev/null || echo '{}'",
             timeout: 5
         ))
+        // SubagentStart/SubagentStop track in-flight Task-tool subagents so
+        // the pane stays Working until the last one stops. These run as direct
+        // hooks: AgentHookDeliveryPolicy keeps Claude subagent events off the
+        // queued lane.
+        hooks["SubagentStart"] = [
+            Self.claudeHookGroup(
+                command: "\(hookCLI) hooks claude subagent-start",
+                timeout: 10
+            ),
+        ]
         hooks["SubagentStop"] = [
+            Self.claudeHookGroup(
+                command: "\(hookCLI) hooks claude subagent-stop",
+                timeout: 10
+            ),
             Self.claudeQueuedHookGroup(
                 subcommand: "feed"
             ),

@@ -4909,3 +4909,66 @@ private final class VetoingCloseBonsplitDelegate: BonsplitDelegate {
         return false
     }
 }
+
+/// Sidebar session-card cycling order (Option+Up/Down) follows the grouped
+/// sidebar projection rather than flat tab order.
+@MainActor
+final class TabManagerSidebarCycleOrderTests: XCTestCase {
+    func testTabCyclingRecoversWhenSelectedWorkspaceIsHiddenFromSidebar() {
+        let manager = TabManager()
+        let first = manager.tabs[0]
+        let hidden = manager.addWorkspace()
+        let last = manager.addWorkspace()
+        manager.selectWorkspace(hidden)
+        manager.updateSidebarVisibleOrder([first.id, last.id])
+
+        manager.selectNextTab()
+        XCTAssertEqual(manager.selectedTabId, first.id)
+
+        manager.selectWorkspace(hidden)
+        manager.selectPreviousTab()
+        XCTAssertEqual(manager.selectedTabId, last.id)
+    }
+
+    func testTabCyclingFollowsGroupedSidebarOrderWithoutVisibleOrderFeed() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("cmux-cycle-projects-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let projectsPath = directory.appendingPathComponent("projects.json").path
+        try Data(#"{"projects": [{"id": "backend"}, {"id": "docs"}]}"#.utf8)
+            .write(to: URL(fileURLWithPath: projectsPath))
+        let store = CmuxConfigStore(
+            globalConfigPath: directory.appendingPathComponent("cmux.json").path,
+            projectsConfigPath: projectsPath
+        )
+        store.loadAll()
+
+        let manager = TabManager()
+        manager.cmuxConfigStore = store
+        let defaultWorkspace = manager.tabs[0]
+        let docsWorkspace = manager.addWorkspace()
+        let backendWorkspace = manager.addWorkspace()
+        let pinnedWorkspace = manager.addWorkspace()
+        docsWorkspace.projectId = "docs"
+        backendWorkspace.projectId = "backend"
+        pinnedWorkspace.isPinned = true
+
+        manager.selectWorkspace(pinnedWorkspace)
+        manager.selectNextTab()
+        XCTAssertEqual(
+            manager.selectedTabId,
+            backendWorkspace.id,
+            "Cycling should follow project group order (Pinned, then configured projects), not flat tab order"
+        )
+
+        manager.selectNextTab()
+        XCTAssertEqual(manager.selectedTabId, docsWorkspace.id, "Projects follow config order")
+
+        manager.selectNextTab()
+        XCTAssertEqual(manager.selectedTabId, defaultWorkspace.id, "Workspaces without a project come last (Other)")
+
+        manager.selectPreviousTab()
+        XCTAssertEqual(manager.selectedTabId, docsWorkspace.id)
+    }
+}

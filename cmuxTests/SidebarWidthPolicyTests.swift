@@ -387,13 +387,17 @@ struct SidebarWorkspaceSelectionColorTests {
     @Test
     func selectedColoredWorkspaceUsesStandardSelectionBackgroundInLightAndDark() {
         for colorScheme in [ColorScheme.light, .dark] {
+            // The standard selection background applies under the
+            // selection-only row background mode; the default mode paints
+            // the workspace color on the active row instead.
             let coloredSelected = sidebarWorkspaceRowBackgroundStyle(
                 activeTabIndicatorStyle: .solidFill,
                 isActive: true,
                 isMultiSelected: false,
                 customColorHex: "#E85D75",
                 colorScheme: colorScheme,
-                sidebarSelectionColorHex: nil
+                sidebarSelectionColorHex: nil,
+                rowBackgroundMode: .selectionOnly
             )
             let standardSelected = sidebarWorkspaceRowBackgroundStyle(
                 activeTabIndicatorStyle: .solidFill,
@@ -416,7 +420,7 @@ struct SidebarWorkspaceSelectionColorTests {
                 colorScheme: colorScheme,
                 sidebarSelectionColorHex: nil
             )
-            #expect(abs(unselectedColored.opacity - 0.7) <= 0.001)
+            #expect(abs(unselectedColored.opacity - 0.55) <= 0.001)
             #expect(
                 !colorsAreEqual(coloredSelected.color, unselectedColored.color),
                 "Selected row should use the standard selection background, not the workspace tab color"
@@ -433,7 +437,8 @@ struct SidebarWorkspaceSelectionColorTests {
             isMultiSelected: false,
             customColorHex: "#E85D75",
             colorScheme: .light,
-            sidebarSelectionColorHex: selectionHex
+            sidebarSelectionColorHex: selectionHex,
+            rowBackgroundMode: .selectionOnly
         )
         let standardSelected = sidebarWorkspaceRowBackgroundStyle(
             activeTabIndicatorStyle: .solidFill,

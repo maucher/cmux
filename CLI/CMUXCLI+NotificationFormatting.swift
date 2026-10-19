@@ -114,7 +114,7 @@ extension CMUXCLI {
     }
 
     /// True when a Claude `Stop`/`Notification` payload reports unfinished
-    /// background work: any `background_tasks` entry still `running`, or a
+    /// background work: any non-terminal `background_tasks` entry, or a
     /// non-empty `session_crons`. A `nil` rawObject or absent keys (claude
     /// < 2.1.145) yield `false`, so older clients behave exactly as before.
     /// Pure over `rawObject` so both the notify gate and the hibernation
@@ -123,7 +123,11 @@ extension CMUXCLI {
         guard let obj = parsedInput.rawObject else { return false }
         if let crons = obj["session_crons"] as? [Any], !crons.isEmpty { return true }
         if let tasks = obj["background_tasks"] as? [[String: Any]] {
-            return tasks.contains { ($0["status"] as? String) == "running" }
+            let terminalStatuses: Set<String> = ["completed", "failed", "killed", "cancelled", "done"]
+            return tasks.contains { task in
+                guard let status = (task["status"] as? String)?.lowercased() else { return true }
+                return !terminalStatuses.contains(status)
+            }
         }
         return false
     }

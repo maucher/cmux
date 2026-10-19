@@ -680,6 +680,12 @@ struct TodoCommand: SharedLegacyFacadeCommand {
     static let configuration = CommandConfiguration(commandName: "todo", helpNames: [])
 }
 
+/// `cmux projects get|set|assign`: sidebar projects (`projects.json`).
+struct ProjectsCommand: SharedLegacyFacadeCommand {
+    @Argument(parsing: .allUnrecognized) var arguments: [String] = []
+    static let configuration = CommandConfiguration(commandName: "projects", helpNames: [])
+}
+
 struct CommentsCommand: SharedLegacyFacadeCommand {
     @Option(name: .customLong("repo"), completion: .directory) var repo: String?
     @Flag(name: .customLong("all")) var all = false

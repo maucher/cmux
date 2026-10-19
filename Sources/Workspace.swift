@@ -194,6 +194,8 @@ extension Workspace {
             isPinned: isPinned,
             isMuted: isMuted,
             groupId: groupId,
+            projectId: projectId,
+            promptLauncherSlot: promptLauncherSlot,
             isManuallyUnread: isWorkspaceManuallyUnread,
             hasUnreadIndicator: hasWorkspaceUnreadIndicator,
             notifications: workspaceNotificationSnapshots.isEmpty ? nil : workspaceNotificationSnapshots,
@@ -379,6 +381,8 @@ extension Workspace {
         isPinned = snapshot.isPinned
         isMuted = snapshot.isMuted ?? false
         groupId = snapshot.groupId
+        projectId = snapshot.projectId
+        promptLauncherSlot = snapshot.promptLauncherSlot
         restoreTodoState(from: snapshot)
 
         // Status entries and agent PIDs are ephemeral runtime state tied to running
@@ -2864,6 +2868,12 @@ final class Workspace: Identifiable, ObservableObject, FilePreviewTabMetadataHos
     /// the variables the daemon relies on (CMUX_WORKSPACE_ID, CMUX_SOCKET_PATH, …).
     /// Persisted in the session manifest and restored before surfaces are rebuilt.
     @Published var workspaceEnvironment: [String: String] = [:]
+    /// Prompt-launcher slot (worktree/session id) bound to this workspace.
+    /// Persisted in the session manifest so hooks keep their slot after relaunch.
+    var promptLauncherSlot: String?
+    /// Sidebar project this workspace belongs to (`projects.json` id). Unknown
+    /// or missing ids render in the "Other" group. Persisted in the session manifest.
+    @Published var projectId: String?
     // Legacy in-memory state for old helpers/tests. Product UI, rendering, and
     // session persistence no longer honor per-workspace scrollbar overrides.
     @Published private(set) var terminalScrollBarHidden: Bool = false
@@ -3322,7 +3332,17 @@ final class Workspace: Identifiable, ObservableObject, FilePreviewTabMetadataHos
     }
     /// The workspace-owned state for the latest failed cloud terminal creation request.
     @MainActor let cloudPaneCreationFailureStore = CloudPaneCreationFailureStore()
-    @Published var remoteConnectionState: WorkspaceRemoteConnectionState = .disconnected
+    @Published var remoteConnectionState: WorkspaceRemoteConnectionState = .disconnected {
+        didSet {
+            guard oldValue != remoteConnectionState,
+                  remoteConnectionState == .error || remoteConnectionState == .suspended else { return }
+            // cmux stopped reconnecting on its own; let the prompt launcher restore it.
+            let workspaceId = id
+            Task { @MainActor in
+                AppDelegate.shared?.promptLauncherAutoRestartCoordinator?.noteRemoteConnectionLost(workspaceId: workspaceId)
+            }
+        }
+    }
     @Published var remoteConnectionDetail: String?
     // Unsuppressed controller truth retained while live terminal liveness
     // temporarily owns the published presentation above.
@@ -7938,6 +7958,105 @@ final class Workspace: Identifiable, ObservableObject, FilePreviewTabMetadataHos
             return nil
         }
         return Self.defaultSSHPTYSessionID(workspaceId: id, panelId: panelId)
+    }
+
+    /// True while a session-card restart (restart hook or local terminal
+    /// replacement) is in flight. Published so the sidebar snapshot pipeline
+    /// rebuilds the card, which renders the restart control as a spinner.
+    @Published var isSessionRestartingFromCard: Bool = false
+
+    /// Replaces the card's remote agent terminal after the new connection reports a TTY.
+    func restartSessionFromCard() {
+        guard let oldPanelId = restartableSessionCardPanelId()
+            ?? sidebarOrderedPanelIds().first(where: { panels[$0] is TerminalPanel }) else {
+            guard let paneId = bonsplitController.focusedPaneId ?? bonsplitController.allPaneIds.first else {
+                return
+            }
+            _ = newTerminalSurface(inPane: paneId, focus: false, workingDirectory: currentDirectory)
+            return
+        }
+        guard let paneId = paneId(forPanelId: oldPanelId) else { return }
+
+        let agent = restoredAgentSnapshotsByPanelId[oldPanelId]
+        let resumeInput = agent?.resumeStartupInput(useLocalRestoreVerb: false)
+
+        let resumeBinding = effectiveSurfaceResumeBinding(
+            panelId: oldPanelId,
+            surfaceResumeBindingIndex: nil
+        )
+        let remotePTYSessionID = remotePTYSessionIDForSnapshot(panelId: oldPanelId)
+        let attachCommand = remotePTYSessionID.map {
+            remotePTYAttachStartupCommand(sessionID: $0)
+        }
+        let bindingInput = remotePTYSessionID == nil
+            ? Self.surfaceResumeStartupInput(
+                resumeBinding,
+                autoResumeAgentSessions: true,
+                promptForApproval: true
+            )
+            : nil
+
+        guard let newPanel = newTerminalSurface(
+            inPane: paneId,
+            focus: focusedPanelId == oldPanelId,
+            workingDirectory: panelDirectories[oldPanelId] ?? currentDirectory,
+            initialCommand: attachCommand,
+            initialInput: attachCommand == nil ? (bindingInput ?? resumeInput) : nil,
+            remotePTYSessionID: remotePTYSessionID,
+            suppressWorkspaceRemoteStartupCommand: attachCommand != nil
+        ) else {
+            return
+        }
+
+        if let agent {
+            restoredAgentLifecycle.setSnapshot(agent, panelId: newPanel.id)
+            restoredAgentLifecycle.setResumeState(
+                attachCommand == nil
+                    ? .awaitingAutoResumeCommand
+                    : .observedAgentCommandRunning,
+                panelId: newPanel.id
+            )
+            invalidatedRestoredAgentFingerprintsByPanelId.removeValue(forKey: newPanel.id)
+        }
+        if let resumeBinding {
+            surfaceResumeBindingsByPanelId[newPanel.id] = resumeBinding
+        }
+
+        finishSessionCardRestart(
+            oldPanelId: oldPanelId,
+            newPanelId: newPanel.id
+        )
+    }
+
+    private func restartableSessionCardPanelId() -> UUID? {
+        sidebarOrderedPanelIds().first { panelId in
+            (activeRemoteTerminalSurfaceIds.contains(panelId) ||
+                pendingRemoteTerminalChildExitSurfaceIds.contains(panelId) ||
+                remoteDisconnectPlaceholderPanelIds.contains(panelId) ||
+                remotePTYSessionIDForSnapshot(panelId: panelId) != nil) &&
+                panels[panelId] is TerminalPanel &&
+                paneId(forPanelId: panelId) != nil &&
+                restoredAgentSnapshotsByPanelId[panelId]?.resumeCommand != nil
+        }
+    }
+
+    private func finishSessionCardRestart(oldPanelId: UUID, newPanelId: UUID) {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            // A TTY is the first reliable signal that the replacement SSH transport connected.
+            // Keep the original tab intact unless that happens within 45 seconds.
+            for _ in 0..<450 {
+                if self.surfaceTTYNames[newPanelId]?.isEmpty == false {
+                    _ = self.closePanel(oldPanelId, force: true)
+                    return
+                }
+                guard self.panels[oldPanelId] != nil, self.panels[newPanelId] != nil else {
+                    return
+                }
+                try? await Task.sleep(for: .milliseconds(100))
+            }
+            _ = self.closePanel(newPanelId, force: true)
+        }
     }
 
     nonisolated static func defaultSSHPTYSessionID(workspaceId: UUID, panelId: UUID) -> String {
